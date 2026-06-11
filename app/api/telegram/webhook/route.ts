@@ -18,16 +18,19 @@ import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
   AFTER_HANDOFF_TEXT,
-  DEEP_FOLLOWUP_TEXT,
+  AUDIT_AGREE_TEXT,
+  AUDIT_DECLINE_TEXT,
+  AUDIT_EXPLANATION_TEXT,
   MATERIAL_LIMIT_TEXT,
   MATERIALS_REQUEST_TEXT,
   MAX_MATERIALS_PER_LEAD,
   MAX_PDF_BYTES,
+  NO_MATERIALS_TEXT,
   PDF_TEXT_EXTRACTION_FAILED_TEXT,
   PDF_TOO_LARGE_TEXT,
   POST_QUIZ_STAGES,
+  POST_QUIZ_FOLLOWUP_LIMIT_TEXT,
   buildMaterialAnalysis,
-  detectHandoffConsent,
   extractPdfTextFromArrayBuffer,
   extractTextMaterial,
   extractUrlMaterial,
@@ -44,6 +47,7 @@ import {
   parseMarketingRoiQuizAnswer,
   type MarketingRoiQuizAnswerKey,
 } from "@/lib/neiroclozer/marketing-roi-quiz";
+import { detectPostQuizIntent } from "@/lib/neiroclozer/post-quiz-intent";
 import {
   answerCallbackQuery,
   getTelegramFileDownloadUrl,
@@ -176,6 +180,10 @@ async function sendAndStorePlainText(chatId: number, leadId: string, expertProfi
   });
 
   return result;
+}
+
+function countIncomingMessages(messages: { direction: string }[]) {
+  return messages.filter((message) => message.direction === "incoming").length;
 }
 
 function hasAnyKeyword(text: string, keywords: string[]) {
@@ -391,6 +399,8 @@ async function handlePostQuizMaterialsFlow(
   incomingMessage: IncomingTelegramMessage,
   lead: SupabaseLeadRow,
   expertProfile: SupabaseExpertProfileRow,
+  intent: ReturnType<typeof detectPostQuizIntent>,
+  recentIncomingCount: number,
 ) {
   const currentStage = lead.current_stage;
 
@@ -399,28 +409,157 @@ async function handlePostQuizMaterialsFlow(
     return;
   }
 
-  if (
-    (currentStage === POST_QUIZ_STAGES.materialsAnalyzed || currentStage === POST_QUIZ_STAGES.auditOffered) &&
-    detectHandoffConsent(incomingMessage.text)
-  ) {
-    const handoffText =
-      "Да, передам Александру твои ответы и материалы. Дальше он посмотрит связку глубже и подскажет, где именно могут теряться заявки.";
+  if (currentStage === POST_QUIZ_STAGES.materialsRequested) {
+    if (intent === "material_provided") {
+      const materialsCount = await getLeadMaterialsCount(lead.id);
 
-    await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, handoffText);
-    await updateLeadById(lead.id, {
-      status: "needs_manual_followup",
-      currentStage: POST_QUIZ_STAGES.handoff,
-      matchedOffer: "diagnostic",
-      warmthLevel: "hot",
-    });
-    return;
-  }
+      if (materialsCount >= MAX_MATERIALS_PER_LEAD) {
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIAL_LIMIT_TEXT);
+        await updateLeadById(lead.id, {
+          currentStage: POST_QUIZ_STAGES.auditOffered,
+          matchedOffer: "diagnostic",
+          warmthLevel: "warm",
+        });
+        return;
+      }
 
-  const materialsCount = await getLeadMaterialsCount(lead.id);
-  const hasDocument = Boolean(incomingMessage.document);
+      const hasDocument = Boolean(incomingMessage.document);
+      let material =
+        !hasDocument && ((await extractUrlMaterial(incomingMessage.text)) ?? extractTextMaterial(incomingMessage.text));
 
-  if (materialsCount >= MAX_MATERIALS_PER_LEAD) {
-    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIAL_LIMIT_TEXT);
+      if (hasDocument) {
+        if (incomingMessage.document?.mimeType !== "application/pdf") {
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, NO_MATERIALS_TEXT);
+          await updateLeadById(lead.id, {
+            currentStage: POST_QUIZ_STAGES.auditOffered,
+            matchedOffer: "diagnostic",
+            warmthLevel: "warm",
+          });
+          return;
+        }
+
+        if (incomingMessage.document.fileSize && incomingMessage.document.fileSize > MAX_PDF_BYTES) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+          return;
+        }
+
+        const downloadUrl = await getTelegramFileDownloadUrl(incomingMessage.document.fileId);
+        const response = await fetch(downloadUrl);
+
+        if (!response.ok) {
+          throw new Error(`Telegram file download failed with status ${response.status}.`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+
+        if (arrayBuffer.byteLength > MAX_PDF_BYTES) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+          return;
+        }
+
+        const rawText = await extractPdfTextFromArrayBuffer(arrayBuffer);
+
+        if (!rawText) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(
+            incomingMessage.telegramChatId,
+            lead.id,
+            expertProfile.id,
+            PDF_TEXT_EXTRACTION_FAILED_TEXT,
+          );
+          return;
+        }
+
+        material = {
+          materialType: "pdf" as const,
+          sourceUrl: null,
+          rawText,
+          telegramFileId: incomingMessage.document.fileId,
+          fileName: incomingMessage.document.fileName,
+        };
+      }
+
+      if (!material) {
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, NO_MATERIALS_TEXT);
+        await updateLeadById(lead.id, {
+          currentStage: POST_QUIZ_STAGES.auditOffered,
+          matchedOffer: "diagnostic",
+          warmthLevel: "warm",
+        });
+        return;
+      }
+
+      const savedMaterial = await createLeadMaterial({
+        leadId: lead.id,
+        materialType: material.materialType,
+        sourceUrl: material.sourceUrl ?? null,
+        telegramFileId: material.telegramFileId ?? null,
+        fileName: material.fileName ?? null,
+        rawText: material.rawText,
+        status: "received",
+      });
+
+      await updateLeadById(lead.id, {
+        currentStage: POST_QUIZ_STAGES.materialsReceived,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+
+      const analysis = await buildMaterialAnalysis({
+        lead,
+        materialText: material.rawText,
+        materialType: material.materialType,
+      });
+
+      await updateLeadMaterialById(savedMaterial.id, {
+        analysis,
+        status: "analyzed",
+      });
+
+      await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, analysis);
+      await updateLeadById(lead.id, {
+        status: "qualified",
+        currentStage: POST_QUIZ_STAGES.auditOffered,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+      return;
+    }
+
+    if (intent === "no_materials") {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, NO_MATERIALS_TEXT);
+      await updateLeadById(lead.id, {
+        currentStage: POST_QUIZ_STAGES.auditOffered,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+      return;
+    }
+
+    if (intent === "user_question") {
+      const replyText = recentIncomingCount >= 12 ? POST_QUIZ_FOLLOWUP_LIMIT_TEXT : AUDIT_EXPLANATION_TEXT;
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, replyText);
+      await updateLeadById(lead.id, {
+        currentStage: POST_QUIZ_STAGES.auditOffered,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+      return;
+    }
+
+    if (intent === "audit_agree") {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
+      await updateLeadById(lead.id, {
+        currentStage: POST_QUIZ_STAGES.auditOffered,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+      return;
+    }
+
+    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
     await updateLeadById(lead.id, {
       currentStage: POST_QUIZ_STAGES.auditOffered,
       matchedOffer: "diagnostic",
@@ -429,101 +568,143 @@ async function handlePostQuizMaterialsFlow(
     return;
   }
 
-  let material =
-    !hasDocument && ((await extractUrlMaterial(incomingMessage.text)) ?? extractTextMaterial(incomingMessage.text));
-
-  if (hasDocument) {
-    if (incomingMessage.document?.mimeType !== "application/pdf") {
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIALS_REQUEST_TEXT);
+  if (currentStage === POST_QUIZ_STAGES.auditOffered) {
+    if (intent === "audit_agree") {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_AGREE_TEXT);
+      await updateLeadById(lead.id, {
+        status: "needs_manual_followup",
+        currentStage: POST_QUIZ_STAGES.handoff,
+        matchedOffer: "diagnostic",
+        warmthLevel: "hot",
+      });
       return;
     }
 
-    if (incomingMessage.document.fileSize && incomingMessage.document.fileSize > MAX_PDF_BYTES) {
-      await saveFailedPdfMaterial(lead.id, incomingMessage);
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+    if (intent === "audit_decline") {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_DECLINE_TEXT);
       return;
     }
 
-    const downloadUrl = await getTelegramFileDownloadUrl(incomingMessage.document.fileId);
-    const response = await fetch(downloadUrl);
+    if (intent === "material_provided") {
+      if (recentIncomingCount >= 12) {
+        await sendAndStorePlainText(
+          incomingMessage.telegramChatId,
+          lead.id,
+          expertProfile.id,
+          POST_QUIZ_FOLLOWUP_LIMIT_TEXT,
+        );
+        return;
+      }
 
-    if (!response.ok) {
-      throw new Error(`Telegram file download failed with status ${response.status}.`);
-    }
+      const materialsCount = await getLeadMaterialsCount(lead.id);
 
-    const arrayBuffer = await response.arrayBuffer();
+      if (materialsCount >= MAX_MATERIALS_PER_LEAD) {
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIAL_LIMIT_TEXT);
+        return;
+      }
 
-    if (arrayBuffer.byteLength > MAX_PDF_BYTES) {
-      await saveFailedPdfMaterial(lead.id, incomingMessage);
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+      const hasDocument = Boolean(incomingMessage.document);
+      let material =
+        !hasDocument && ((await extractUrlMaterial(incomingMessage.text)) ?? extractTextMaterial(incomingMessage.text));
+
+      if (hasDocument) {
+        if (incomingMessage.document?.mimeType !== "application/pdf") {
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
+          return;
+        }
+
+        if (incomingMessage.document.fileSize && incomingMessage.document.fileSize > MAX_PDF_BYTES) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+          return;
+        }
+
+        const downloadUrl = await getTelegramFileDownloadUrl(incomingMessage.document.fileId);
+        const response = await fetch(downloadUrl);
+
+        if (!response.ok) {
+          throw new Error(`Telegram file download failed with status ${response.status}.`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+
+        if (arrayBuffer.byteLength > MAX_PDF_BYTES) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+          return;
+        }
+
+        const rawText = await extractPdfTextFromArrayBuffer(arrayBuffer);
+
+        if (!rawText) {
+          await saveFailedPdfMaterial(lead.id, incomingMessage);
+          await sendAndStorePlainText(
+            incomingMessage.telegramChatId,
+            lead.id,
+            expertProfile.id,
+            PDF_TEXT_EXTRACTION_FAILED_TEXT,
+          );
+          return;
+        }
+
+        material = {
+          materialType: "pdf" as const,
+          sourceUrl: null,
+          rawText,
+          telegramFileId: incomingMessage.document.fileId,
+          fileName: incomingMessage.document.fileName,
+        };
+      }
+
+      if (!material) {
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
+        return;
+      }
+
+      const savedMaterial = await createLeadMaterial({
+        leadId: lead.id,
+        materialType: material.materialType,
+        sourceUrl: material.sourceUrl ?? null,
+        telegramFileId: material.telegramFileId ?? null,
+        fileName: material.fileName ?? null,
+        rawText: material.rawText,
+        status: "received",
+      });
+
+      await updateLeadById(lead.id, {
+        currentStage: POST_QUIZ_STAGES.materialsReceived,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
+
+      const analysis = await buildMaterialAnalysis({
+        lead,
+        materialText: material.rawText,
+        materialType: material.materialType,
+      });
+
+      await updateLeadMaterialById(savedMaterial.id, {
+        analysis,
+        status: "analyzed",
+      });
+
+      await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, analysis);
+      await updateLeadById(lead.id, {
+        status: "qualified",
+        currentStage: POST_QUIZ_STAGES.auditOffered,
+        matchedOffer: "diagnostic",
+        warmthLevel: "warm",
+      });
       return;
     }
 
-    const rawText = await extractPdfTextFromArrayBuffer(arrayBuffer);
-
-    if (!rawText) {
-      await saveFailedPdfMaterial(lead.id, incomingMessage);
-      await sendAndStorePlainText(
-        incomingMessage.telegramChatId,
-        lead.id,
-        expertProfile.id,
-        PDF_TEXT_EXTRACTION_FAILED_TEXT,
-      );
+    if (recentIncomingCount >= 12) {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, POST_QUIZ_FOLLOWUP_LIMIT_TEXT);
       return;
     }
 
-    material = {
-      materialType: "pdf" as const,
-      sourceUrl: null,
-      rawText,
-      telegramFileId: incomingMessage.document.fileId,
-      fileName: incomingMessage.document.fileName,
-    };
+    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
   }
-
-  if (!material) {
-    const fallbackText =
-      currentStage === POST_QUIZ_STAGES.materialsRequested
-        ? MATERIALS_REQUEST_TEXT
-        : DEEP_FOLLOWUP_TEXT;
-    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, fallbackText);
-    return;
-  }
-
-  const savedMaterial = await createLeadMaterial({
-    leadId: lead.id,
-    materialType: material.materialType,
-    sourceUrl: material.sourceUrl ?? null,
-    telegramFileId: material.telegramFileId ?? null,
-    fileName: material.fileName ?? null,
-    rawText: material.rawText,
-    status: "received",
-  });
-
-  await updateLeadById(lead.id, {
-    currentStage: POST_QUIZ_STAGES.materialsReceived,
-    matchedOffer: "diagnostic",
-    warmthLevel: "warm",
-  });
-
-  const analysis = await buildMaterialAnalysis({
-    lead,
-    materialText: material.rawText,
-    materialType: material.materialType,
-  });
-
-  await updateLeadMaterialById(savedMaterial.id, {
-    analysis,
-    status: "analyzed",
-  });
-
-  await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, analysis);
-  await updateLeadById(lead.id, {
-    status: "qualified",
-    currentStage: POST_QUIZ_STAGES.auditOffered,
-    matchedOffer: "diagnostic",
-    warmthLevel: "warm",
-  });
 }
 
 export async function POST(request: Request) {
@@ -766,7 +947,15 @@ export async function POST(request: Request) {
         warmthLevel: "warm",
       });
     } else if (isExistingPostQuizStage) {
-      await handlePostQuizMaterialsFlow(incomingMessage, updatedLead, expertProfile);
+      const recentMessages = await getRecentMessagesByLeadId(lead.id, 30);
+      const intent = detectPostQuizIntent({
+        currentStage: updatedLead.current_stage,
+        text: incomingMessage.text,
+        hasDocument: Boolean(incomingMessage.document),
+      });
+      const recentIncomingCount = countIncomingMessages(recentMessages);
+
+      await handlePostQuizMaterialsFlow(incomingMessage, updatedLead, expertProfile, intent, recentIncomingCount);
     } else {
       const [offers, faq, objections, messages] = await Promise.all([
         getActiveExpertOffers(expertProfile.id),
