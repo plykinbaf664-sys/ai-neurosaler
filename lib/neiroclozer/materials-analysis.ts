@@ -1,5 +1,8 @@
 import type { SupabaseLeadRow } from "@/lib/supabase-rest";
-import { generateAnthropicText } from "@/lib/neiroclozer/generate-reply";
+import {
+  DEFAULT_MATERIAL_ANALYSIS_TOKENS,
+  generateAnthropicText,
+} from "@/lib/neiroclozer/generate-reply";
 
 export const POST_QUIZ_STAGES = {
   quizCompleted: "quiz_completed",
@@ -212,7 +215,7 @@ export async function buildMaterialAnalysis(params: {
     params.materialText,
   ].join("\n");
 
-  return generateAnthropicText(prompt, 520);
+  return generateAnthropicText(prompt, DEFAULT_MATERIAL_ANALYSIS_TOKENS);
 }
 
 function extractReadableTextFromHtml(html: string) {

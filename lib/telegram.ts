@@ -85,6 +85,8 @@ type TelegramReplyMarkup = {
   one_time_keyboard?: boolean;
 };
 
+const TELEGRAM_SAFE_CHUNK_LIMIT = 3500;
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -115,6 +117,77 @@ function convertMarkdownToTelegramHtml(text: string) {
     (result, block, index) => result.replace(`__CODE_BLOCK_${index}__`, block),
     formatted,
   );
+}
+
+function splitTextByBoundaries(text: string, maxLength: number) {
+  const normalized = text.trim();
+
+  if (normalized.length <= maxLength) {
+    return [normalized];
+  }
+
+  const paragraphs = normalized.split(/\n{2,}/);
+  const chunks: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    const trimmed = current.trim();
+    if (trimmed) {
+      chunks.push(trimmed);
+    }
+    current = "";
+  };
+
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+
+    pushCurrent();
+
+    if (paragraph.length <= maxLength) {
+      current = paragraph;
+      continue;
+    }
+
+    const sentences = paragraph.match(/[^.!?…]+[.!?…]?/g) ?? [paragraph];
+    let sentenceBuffer = "";
+
+    for (const sentence of sentences) {
+      const sentenceCandidate = sentenceBuffer ? `${sentenceBuffer} ${sentence}` : sentence;
+
+      if (sentenceCandidate.length <= maxLength) {
+        sentenceBuffer = sentenceCandidate;
+        continue;
+      }
+
+      if (sentenceBuffer) {
+        chunks.push(sentenceBuffer.trim());
+        sentenceBuffer = "";
+      }
+
+      if (sentence.length <= maxLength) {
+        sentenceBuffer = sentence;
+        continue;
+      }
+
+      for (let index = 0; index < sentence.length; index += maxLength) {
+        const part = sentence.slice(index, index + maxLength).trim();
+        if (part) {
+          chunks.push(part);
+        }
+      }
+    }
+
+    current = sentenceBuffer;
+  }
+
+  pushCurrent();
+
+  return chunks.length > 0 ? chunks : [normalized.slice(0, maxLength)];
 }
 
 function getTelegramBotToken() {
@@ -261,4 +334,16 @@ export async function sendTextMessage(chatId: number, text: string, replyMarkup?
     telegramMessageId: data.result.message_id,
     text: data.result.text ?? text,
   };
+}
+
+export async function sendTextMessages(chatId: number, text: string, replyMarkup?: TelegramReplyMarkup) {
+  const parts = splitTextByBoundaries(text, TELEGRAM_SAFE_CHUNK_LIMIT);
+  const results = [];
+
+  for (const [index, part] of parts.entries()) {
+    const result = await sendTextMessage(chatId, part, index === 0 ? replyMarkup : undefined);
+    results.push(result);
+  }
+
+  return results;
 }

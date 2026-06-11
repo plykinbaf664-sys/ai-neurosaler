@@ -9,7 +9,8 @@ type AnthropicResponse = {
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const ANTHROPIC_API_VERSION = "2023-06-01";
-const MAX_REPLY_TOKENS = 220;
+export const DEFAULT_REPLY_TOKENS = 900;
+export const DEFAULT_MATERIAL_ANALYSIS_TOKENS = 1500;
 
 function extractResponseText(responseData: AnthropicResponse) {
   return (
@@ -22,7 +23,7 @@ function extractResponseText(responseData: AnthropicResponse) {
   );
 }
 
-export async function generateAnthropicText(prompt: string, maxTokens = MAX_REPLY_TOKENS) {
+export async function generateAnthropicText(prompt: string, maxTokens = DEFAULT_REPLY_TOKENS) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
@@ -59,5 +60,5 @@ export async function generateAnthropicText(prompt: string, maxTokens = MAX_REPL
 }
 
 export async function generateNeiroReply(prompt: string) {
-  return generateAnthropicText(prompt, MAX_REPLY_TOKENS);
+  return generateAnthropicText(prompt, DEFAULT_REPLY_TOKENS);
 }

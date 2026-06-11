@@ -56,6 +56,7 @@ import {
   getTelegramFileDownloadUrl,
   parseTelegramPrivateTextMessage,
   sendTextMessage,
+  sendTextMessages,
   verifyTelegramWebhookSecret,
 } from "@/lib/telegram";
 
@@ -179,35 +180,39 @@ function extractRecentMarketingRoiQuizAnswers(messages: { direction: string; tex
 }
 
 async function sendAndStoreAiReply(chatId: number, leadId: string, expertProfileId: string, text: string) {
-  const result = await sendTextMessage(chatId, text);
+  const results = await sendTextMessages(chatId, text);
 
-  await insertMessage({
-    leadId,
-    expertProfileId,
-    direction: "outgoing",
-    channel: "telegram",
-    telegramMessageId: result.telegramMessageId,
-    text,
-    messageType: "ai_reply",
-  });
+  for (const result of results) {
+    await insertMessage({
+      leadId,
+      expertProfileId,
+      direction: "outgoing",
+      channel: "telegram",
+      telegramMessageId: result.telegramMessageId,
+      text: result.text,
+      messageType: "ai_reply",
+    });
+  }
 
-  return result;
+  return results[0] ?? null;
 }
 
 async function sendAndStorePlainText(chatId: number, leadId: string, expertProfileId: string, text: string) {
-  const result = await sendTextMessage(chatId, text);
+  const results = await sendTextMessages(chatId, text);
 
-  await insertMessage({
-    leadId,
-    expertProfileId,
-    direction: "outgoing",
-    channel: "telegram",
-    telegramMessageId: result.telegramMessageId,
-    text,
-    messageType: "ai_reply",
-  });
+  for (const result of results) {
+    await insertMessage({
+      leadId,
+      expertProfileId,
+      direction: "outgoing",
+      channel: "telegram",
+      telegramMessageId: result.telegramMessageId,
+      text: result.text,
+      messageType: "ai_reply",
+    });
+  }
 
-  return result;
+  return results[0] ?? null;
 }
 
 async function sendAndStorePlainTextWithMarkup(
@@ -217,19 +222,21 @@ async function sendAndStorePlainTextWithMarkup(
   text: string,
   replyMarkup: Parameters<typeof sendTextMessage>[2],
 ) {
-  const result = await sendTextMessage(chatId, text, replyMarkup);
+  const results = await sendTextMessages(chatId, text, replyMarkup);
 
-  await insertMessage({
-    leadId,
-    expertProfileId,
-    direction: "outgoing",
-    channel: "telegram",
-    telegramMessageId: result.telegramMessageId,
-    text,
-    messageType: "ai_reply",
-  });
+  for (const result of results) {
+    await insertMessage({
+      leadId,
+      expertProfileId,
+      direction: "outgoing",
+      channel: "telegram",
+      telegramMessageId: result.telegramMessageId,
+      text: result.text,
+      messageType: "ai_reply",
+    });
+  }
 
-  return result;
+  return results[0] ?? null;
 }
 
 async function sendAndStoreKnowledgeReply(params: {
@@ -251,17 +258,19 @@ async function sendAndStoreKnowledgeReply(params: {
   });
 
   const reply = await generateNeiroReply(prompt);
-  const result = await sendTextMessage(params.chatId, reply);
+  const results = await sendTextMessages(params.chatId, reply);
 
-  await insertMessage({
-    leadId: params.lead.id,
-    expertProfileId: params.expertProfile.id,
-    direction: "outgoing",
-    channel: "telegram",
-    telegramMessageId: result.telegramMessageId,
-    text: reply,
-    messageType: "ai_reply",
-  });
+  for (const result of results) {
+    await insertMessage({
+      leadId: params.lead.id,
+      expertProfileId: params.expertProfile.id,
+      direction: "outgoing",
+      channel: "telegram",
+      telegramMessageId: result.telegramMessageId,
+      text: result.text,
+      messageType: "ai_reply",
+    });
+  }
 
   if (reply.includes(getCalendarLink())) {
     await updateLeadById(params.lead.id, {
@@ -269,7 +278,7 @@ async function sendAndStoreKnowledgeReply(params: {
     });
   }
 
-  return result;
+  return results[0] ?? null;
 }
 
 function countIncomingMessages(messages: { direction: string }[]) {
