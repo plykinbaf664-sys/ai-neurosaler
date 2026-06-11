@@ -18,7 +18,6 @@ import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
   AFTER_HANDOFF_TEXT,
-  AUDIT_AGREE_TEXT,
   AUDIT_DECLINE_TEXT,
   AUDIT_EXPLANATION_TEXT,
   MATERIAL_LIMIT_TEXT,
@@ -104,6 +103,31 @@ function getCalendarLink() {
   return process.env.CALENDAR_LINK || "https://calendar.app.google/rpFMG61ce4dXL54z5";
 }
 
+function buildAuditBookingText() {
+  const calendarLink = getCalendarLink();
+
+  return [
+    `Отлично. Вот ссылка на запись: ${calendarLink}`,
+    "",
+    "Если удобнее не самому, Александр подхватит и свяжется лично.",
+  ].join("\n");
+}
+
+function buildAuditBookingMarkup() {
+  const calendarLink = getCalendarLink();
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "Записаться",
+          url: calendarLink,
+        },
+      ],
+    ],
+  };
+}
+
 function getBookedStage(matchedOffer: string | null, currentStage: string) {
   if (currentStage === "awaiting_expert_call") {
     return "expert_call_confirmed";
@@ -168,6 +192,28 @@ async function sendAndStoreAiReply(chatId: number, leadId: string, expertProfile
 
 async function sendAndStorePlainText(chatId: number, leadId: string, expertProfileId: string, text: string) {
   const result = await sendTextMessage(chatId, text);
+
+  await insertMessage({
+    leadId,
+    expertProfileId,
+    direction: "outgoing",
+    channel: "telegram",
+    telegramMessageId: result.telegramMessageId,
+    text,
+    messageType: "ai_reply",
+  });
+
+  return result;
+}
+
+async function sendAndStorePlainTextWithMarkup(
+  chatId: number,
+  leadId: string,
+  expertProfileId: string,
+  text: string,
+  replyMarkup: Parameters<typeof sendTextMessage>[2],
+) {
+  const result = await sendTextMessage(chatId, text, replyMarkup);
 
   await insertMessage({
     leadId,
@@ -265,6 +311,24 @@ function hasBookedSignal(text: string) {
     "назначила созвон",
     "взял слот",
     "взяла слот",
+  ]);
+}
+
+function isBookingLinkRequest(text: string) {
+  return hasAnyKeyword(text, [
+    "ссылка",
+    "ссылку",
+    "запись",
+    "записаться",
+    "календар",
+    "календарь",
+    "созвон",
+    "слот",
+    "слоты",
+    "куда записаться",
+    "как записаться",
+    "бронь",
+    "брони",
   ]);
 }
 
@@ -403,6 +467,29 @@ async function handlePostQuizMaterialsFlow(
   recentIncomingCount: number,
 ) {
   const currentStage = lead.current_stage;
+  const bookingText = buildAuditBookingText();
+  const bookingMarkup = buildAuditBookingMarkup();
+
+  if (isBookingLinkRequest(incomingMessage.text)) {
+    await sendAndStorePlainTextWithMarkup(
+      incomingMessage.telegramChatId,
+      lead.id,
+      expertProfile.id,
+      bookingText,
+      bookingMarkup,
+    );
+
+    if (currentStage !== POST_QUIZ_STAGES.handoff) {
+      await updateLeadById(lead.id, {
+        status: "needs_manual_followup",
+        currentStage: POST_QUIZ_STAGES.handoff,
+        matchedOffer: "diagnostic",
+        warmthLevel: "hot",
+      });
+    }
+
+    return;
+  }
 
   if (currentStage === POST_QUIZ_STAGES.handoff) {
     await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AFTER_HANDOFF_TEXT);
@@ -550,11 +637,18 @@ async function handlePostQuizMaterialsFlow(
     }
 
     if (intent === "audit_agree") {
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
+      await sendAndStorePlainTextWithMarkup(
+        incomingMessage.telegramChatId,
+        lead.id,
+        expertProfile.id,
+        bookingText,
+        bookingMarkup,
+      );
       await updateLeadById(lead.id, {
-        currentStage: POST_QUIZ_STAGES.auditOffered,
+        status: "needs_manual_followup",
+        currentStage: POST_QUIZ_STAGES.handoff,
         matchedOffer: "diagnostic",
-        warmthLevel: "warm",
+        warmthLevel: "hot",
       });
       return;
     }
@@ -570,7 +664,13 @@ async function handlePostQuizMaterialsFlow(
 
   if (currentStage === POST_QUIZ_STAGES.auditOffered) {
     if (intent === "audit_agree") {
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_AGREE_TEXT);
+      await sendAndStorePlainTextWithMarkup(
+        incomingMessage.telegramChatId,
+        lead.id,
+        expertProfile.id,
+        bookingText,
+        bookingMarkup,
+      );
       await updateLeadById(lead.id, {
         status: "needs_manual_followup",
         currentStage: POST_QUIZ_STAGES.handoff,
@@ -913,7 +1013,7 @@ export async function POST(request: Request) {
         return Response.json({ ok: true });
       }
 
-      const recentMessages = await getRecentMessagesByLeadId(lead.id, 10);
+      const recentMessages = await getRecentMessagesByLeadId(lead.id, 12);
       const answerKeys = extractRecentMarketingRoiQuizAnswers(recentMessages);
       const verdictText = buildMarketingRoiQuizVerdict(answerKeys);
       const verdictResult = await sendTextMessage(incomingMessage.telegramChatId, verdictText);
@@ -961,7 +1061,7 @@ export async function POST(request: Request) {
         getActiveExpertOffers(expertProfile.id),
         getActiveExpertFaq(expertProfile.id),
         getActiveExpertObjections(expertProfile.id),
-        getRecentMessagesByLeadId(lead.id, 10),
+        getRecentMessagesByLeadId(lead.id, 12),
       ]);
 
       const prompt = buildNeiroPrompt({

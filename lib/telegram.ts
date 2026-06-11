@@ -78,7 +78,8 @@ type TelegramReplyMarkup = {
   keyboard?: string[][];
   inline_keyboard?: {
     text: string;
-    callback_data: string;
+    callback_data?: string;
+    url?: string;
   }[][];
   resize_keyboard?: boolean;
   one_time_keyboard?: boolean;

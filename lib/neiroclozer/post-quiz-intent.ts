@@ -24,6 +24,38 @@ function isQuestionText(text: string) {
   return text.includes("?") || hasAny(text, ["что такое", "что дальше", "как", "зачем", "сколько", "можно без", "а если"]);
 }
 
+function isSimpleAffirmative(text: string) {
+  return hasAny(text, [
+    "да",
+    "давай",
+    "давайте",
+    "ок",
+    "окей",
+    "хочу",
+    "готов",
+    "готова",
+    "согласен",
+    "согласна",
+    "передавай",
+    "передай",
+    "интересно",
+  ]);
+}
+
+function isSimpleNegative(text: string) {
+  return hasAny(text, [
+    "нет",
+    "не сейчас",
+    "подумаю",
+    "потом",
+    "не надо",
+    "не нужно",
+    "не хочу",
+    "не готов",
+    "пока нет",
+  ]);
+}
+
 function isMaterialText(text: string) {
   if (text.length >= 120) {
     return true;
@@ -46,56 +78,35 @@ export function detectPostQuizIntent(params: PostQuizIntentParams): PostQuizInte
 
   if (stage === "materials_requested") {
     if (
+      isSimpleNegative(text) ||
       hasAny(text, [
         "нет материалов",
-        "пока нет",
-        "нечего",
         "скинуть нечего",
         "ничего нет",
         "сайта нет",
         "pdf нет",
         "пока только идея",
-        "пока ничего",
-        "у меня нет",
-        "мне нечего",
         "без материалов",
         "без pdf",
+        "нечего скинуть",
+        "мне нечего",
+        "у меня нет",
       ])
     ) {
       return "no_materials";
     }
+
+    if (isSimpleAffirmative(text)) {
+      return "audit_agree";
+    }
   }
 
   if (stage === "audit_offered") {
-    if (
-      hasAny(text, [
-        "не сейчас",
-        "подумаю",
-        "потом",
-        "не надо",
-        "не нужно",
-        "не хочу",
-        "не готов",
-        "пока нет",
-      ])
-    ) {
+    if (isSimpleNegative(text)) {
       return "audit_decline";
     }
 
-    if (
-      hasAny(text, [
-        "да",
-        "давай",
-        "передавай",
-        "ок",
-        "окей",
-        "хочу",
-        "интересно",
-        "согласен",
-        "согласна",
-        "готов",
-      ])
-    ) {
+    if (isSimpleAffirmative(text)) {
       return "audit_agree";
     }
   }
