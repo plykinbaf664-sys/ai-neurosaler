@@ -227,3 +227,5 @@ Expected API routes in the production build:
 - Telegram webhook is currently intended to point to this standalone project, not the old monolith.
 - The AI reply implementation currently uses Anthropic via `ANTHROPIC_API_KEY`.
 - `SUPABASE_SERVICE_ROLE_KEY` is required because the API routes use server-side Supabase REST access.
+
+!!!!!
