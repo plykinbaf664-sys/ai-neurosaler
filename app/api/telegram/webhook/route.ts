@@ -11,8 +11,12 @@ import {
   insertMessage,
   updateLeadMaterialById,
   updateLeadById,
+  type SupabaseExpertFaqRow,
+  type SupabaseExpertObjectionRow,
+  type SupabaseExpertOfferRow,
   type SupabaseExpertProfileRow,
   type SupabaseLeadRow,
+  type SupabaseMessageRow,
 } from "@/lib/supabase-rest";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
@@ -228,12 +232,77 @@ async function sendAndStorePlainTextWithMarkup(
   return result;
 }
 
+async function sendAndStoreKnowledgeReply(params: {
+  chatId: number;
+  lead: SupabaseLeadRow;
+  expertProfile: SupabaseExpertProfileRow;
+  offers: SupabaseExpertOfferRow[];
+  faq: SupabaseExpertFaqRow[];
+  objections: SupabaseExpertObjectionRow[];
+  messages: SupabaseMessageRow[];
+}) {
+  const prompt = buildNeiroPrompt({
+    expert: params.expertProfile,
+    offers: params.offers,
+    faq: params.faq,
+    objections: params.objections,
+    lead: params.lead,
+    messages: params.messages,
+  });
+
+  const reply = await generateNeiroReply(prompt);
+  const result = await sendTextMessage(params.chatId, reply);
+
+  await insertMessage({
+    leadId: params.lead.id,
+    expertProfileId: params.expertProfile.id,
+    direction: "outgoing",
+    channel: "telegram",
+    telegramMessageId: result.telegramMessageId,
+    text: reply,
+    messageType: "ai_reply",
+  });
+
+  if (reply.includes(getCalendarLink())) {
+    await updateLeadById(params.lead.id, {
+      currentStage: getBookedStage(params.lead.matched_offer, params.lead.current_stage),
+    });
+  }
+
+  return result;
+}
+
 function countIncomingMessages(messages: { direction: string }[]) {
   return messages.filter((message) => message.direction === "incoming").length;
 }
 
 function hasAnyKeyword(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function isKnowledgeQuestion(text: string) {
+  const normalized = text.toLowerCase();
+
+  return hasAnyKeyword(normalized, [
+    "продукт",
+    "продукты",
+    "оффер",
+    "офферы",
+    "услуг",
+    "цена",
+    "стоим",
+    "формат",
+    "как работает",
+    "материал",
+    "аудит",
+    "нейроаудит",
+    "запис",
+    "календар",
+    "ссылк",
+    "что входит",
+    "что есть",
+    "что за",
+  ]);
 }
 
 function detectMatchedOffer(text: string) {
@@ -463,6 +532,10 @@ async function handlePostQuizMaterialsFlow(
   incomingMessage: IncomingTelegramMessage,
   lead: SupabaseLeadRow,
   expertProfile: SupabaseExpertProfileRow,
+  offers: SupabaseExpertOfferRow[],
+  faq: SupabaseExpertFaqRow[],
+  objections: SupabaseExpertObjectionRow[],
+  messages: SupabaseMessageRow[],
   intent: ReturnType<typeof detectPostQuizIntent>,
   recentIncomingCount: number,
 ) {
@@ -488,6 +561,19 @@ async function handlePostQuizMaterialsFlow(
       });
     }
 
+    return;
+  }
+
+  if (isKnowledgeQuestion(incomingMessage.text) || intent === "user_question") {
+    await sendAndStoreKnowledgeReply({
+      chatId: incomingMessage.telegramChatId,
+      lead,
+      expertProfile,
+      offers,
+      faq,
+      objections,
+      messages,
+    });
     return;
   }
 
@@ -617,17 +703,6 @@ async function handlePostQuizMaterialsFlow(
 
     if (intent === "no_materials") {
       await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, NO_MATERIALS_TEXT);
-      await updateLeadById(lead.id, {
-        currentStage: POST_QUIZ_STAGES.auditOffered,
-        matchedOffer: "diagnostic",
-        warmthLevel: "warm",
-      });
-      return;
-    }
-
-    if (intent === "user_question") {
-      const replyText = recentIncomingCount >= 12 ? POST_QUIZ_FOLLOWUP_LIMIT_TEXT : AUDIT_EXPLANATION_TEXT;
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, replyText);
       await updateLeadById(lead.id, {
         currentStage: POST_QUIZ_STAGES.auditOffered,
         matchedOffer: "diagnostic",
@@ -1047,7 +1122,12 @@ export async function POST(request: Request) {
         warmthLevel: "warm",
       });
     } else if (isExistingPostQuizStage) {
-      const recentMessages = await getRecentMessagesByLeadId(lead.id, 30);
+      const [offers, faq, objections, recentMessages] = await Promise.all([
+        getActiveExpertOffers(expertProfile.id),
+        getActiveExpertFaq(expertProfile.id),
+        getActiveExpertObjections(expertProfile.id),
+        getRecentMessagesByLeadId(lead.id, 30),
+      ]);
       const intent = detectPostQuizIntent({
         currentStage: updatedLead.current_stage,
         text: incomingMessage.text,
@@ -1055,7 +1135,17 @@ export async function POST(request: Request) {
       });
       const recentIncomingCount = countIncomingMessages(recentMessages);
 
-      await handlePostQuizMaterialsFlow(incomingMessage, updatedLead, expertProfile, intent, recentIncomingCount);
+      await handlePostQuizMaterialsFlow(
+        incomingMessage,
+        updatedLead,
+        expertProfile,
+        offers,
+        faq,
+        objections,
+        recentMessages,
+        intent,
+        recentIncomingCount,
+      );
     } else {
       const [offers, faq, objections, messages] = await Promise.all([
         getActiveExpertOffers(expertProfile.id),
@@ -1063,33 +1153,15 @@ export async function POST(request: Request) {
         getActiveExpertObjections(expertProfile.id),
         getRecentMessagesByLeadId(lead.id, 12),
       ]);
-
-      const prompt = buildNeiroPrompt({
-        expert: expertProfile,
+      await sendAndStoreKnowledgeReply({
+        chatId: incomingMessage.telegramChatId,
+        lead: updatedLead,
+        expertProfile,
         offers,
         faq,
         objections,
-        lead: updatedLead,
         messages,
       });
-      const reply = await generateNeiroReply(prompt);
-      const replyResult = await sendTextMessage(incomingMessage.telegramChatId, reply);
-
-      await insertMessage({
-        leadId: lead.id,
-        expertProfileId: expertProfile.id,
-        direction: "outgoing",
-        channel: "telegram",
-        telegramMessageId: replyResult.telegramMessageId,
-        text: reply,
-        messageType: "ai_reply",
-      });
-
-      if (reply.includes(getCalendarLink())) {
-        await updateLeadById(lead.id, {
-          currentStage: getBookedStage(updatedLead.matched_offer, updatedLead.current_stage),
-        });
-      }
     }
 
     return Response.json({ ok: true });
