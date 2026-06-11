@@ -1,5 +1,3 @@
-import { PDFParse } from "pdf-parse";
-
 import type { SupabaseLeadRow } from "@/lib/supabase-rest";
 import { generateAnthropicText } from "@/lib/neiroclozer/generate-reply";
 
@@ -133,6 +131,7 @@ export function extractTextMaterial(text: string): ExtractedMaterial | null {
 }
 
 export async function extractPdfTextFromArrayBuffer(arrayBuffer: ArrayBuffer) {
+  const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: new Uint8Array(arrayBuffer) });
 
   try {
