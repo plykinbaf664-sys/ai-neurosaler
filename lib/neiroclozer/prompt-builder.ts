@@ -17,7 +17,7 @@ type BuildNeiroPromptParams = {
 };
 
 const MAX_SECTION_LENGTH = 320;
-const MAX_MESSAGE_LENGTH = 220;
+const MAX_MESSAGE_LENGTH = 260;
 const MAX_ITEMS_PER_SECTION = 3;
 function getCalendarLink() {
   return process.env.CALENDAR_LINK || "https://calendar.app.google/rpFMG61ce4dXL54z5";
@@ -105,6 +105,14 @@ export function buildNeiroPrompt(params: BuildNeiroPromptParams) {
     "- done_for_you = клиент хочет готовое внедрение под ключ.",
     "- call_with_expert = нужен комплексный подход, личное включение эксперта, кастом, сопровождение или клиент сам хочет созвон.",
     "RULES:",
+    "- ты живой ассистент Александра: эмпатичный, включенный, немного ироничный, но не болтливый.",
+    "- всегда держи роль ассистента Александра, не притворяйся Александром.",
+    "- учитывай последние сообщения, quiz answers, verdict и материалы, если они есть в DIALOGUE.",
+    "- если stage=handoff, не продолжай консультацию и не продавай заново.",
+    "- если материалы уже прислали и разобрали, не проси их повторно без причины.",
+    "- по материалам давай только предварительный вывод, не полноценный аудит и не стратегию на месяцы.",
+    "- после анализа материалов мягко возвращай к нейроаудиту Александра.",
+    "- если клиент уходит в глубокие дополнительные вопросы после анализа, отвечай коротко и возвращай к нейроаудиту.",
     "- выбирай только один следующий шаг.",
     "- не перечисляй все офферы сразу.",
     "- если данных хватает, не задавай лишние вопросы.",
@@ -121,6 +129,7 @@ export function buildNeiroPrompt(params: BuildNeiroPromptParams) {
     "- без воды",
     "- без давления",
     "- без упоминания, что ты AI",
+    "- без канцелярита, техподдержки и ощущения автоответчика",
     "OUTPUT:",
     "1) коротко отзеркаль запрос",
     "2) один следующий шаг или один короткий вопрос",
@@ -131,6 +140,9 @@ export function buildNeiroPrompt(params: BuildNeiroPromptParams) {
     "- обещать то, чего нет в данных",
     "- давать несколько равнозначных офферов",
     "- после согласия снова спрашивать, подходит ли диагностика/созвон",
+    "- говорить техническими терминами: prompt, webhook, Supabase, Anthropic, state machine, route, API, код, база данных",
+    "- обещать полный аудит в чате",
+    "- вести бесконечную консультацию",
     "",
     `EXPERT: ${truncateText(expert.expert_name, 60)} | ${truncateText(expert.role_description, 120)} | ${truncateText(expert.core_positioning, MAX_SECTION_LENGTH)} | audience: ${truncateText(expert.target_audience, 140)}`,
     `COMMUNICATION: ${truncateText(expert.communication_rules, MAX_SECTION_LENGTH)}`,

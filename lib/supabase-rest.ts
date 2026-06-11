@@ -84,6 +84,19 @@ type SupabaseMessageRow = {
   created_at: string;
 };
 
+type SupabaseLeadMaterialRow = {
+  id: string;
+  lead_id: string | null;
+  material_type: "pdf" | "url" | "text" | "unknown";
+  source_url: string | null;
+  telegram_file_id: string | null;
+  file_name: string | null;
+  raw_text: string | null;
+  analysis: string | null;
+  status: "received" | "analyzed" | "failed";
+  created_at: string;
+};
+
 type LeadUpsertInput = {
   expertProfileId: string | null;
   telegramUserId: number;
@@ -100,6 +113,17 @@ type LeadUpsertInput = {
   giftLinkClickedAt?: string | null;
   giftFollowupDueAt?: string | null;
   giftFollowupSentAt?: string | null;
+};
+
+type LeadMaterialInsertInput = {
+  leadId: string;
+  materialType: "pdf" | "url" | "text" | "unknown";
+  sourceUrl?: string | null;
+  telegramFileId?: string | null;
+  fileName?: string | null;
+  rawText?: string | null;
+  analysis?: string | null;
+  status?: "received" | "analyzed" | "failed";
 };
 
 type MessageInsertInput = {
@@ -215,6 +239,67 @@ export async function getRecentMessagesByLeadId(leadId: string, limit = 10) {
   );
 }
 
+export async function getLeadMaterialsCount(leadId: string) {
+  const rows = await supabaseRequest<{ id: string }[]>(
+    `lead_materials?select=id&lead_id=eq.${encodeURIComponent(leadId)}`,
+  );
+
+  return rows.length;
+}
+
+export async function createLeadMaterial(input: LeadMaterialInsertInput) {
+  const rows = await supabaseRequest<SupabaseLeadMaterialRow[]>("lead_materials", {
+    method: "POST",
+    headers: {
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify([
+      {
+        lead_id: input.leadId,
+        material_type: input.materialType,
+        source_url: input.sourceUrl ?? null,
+        telegram_file_id: input.telegramFileId ?? null,
+        file_name: input.fileName ?? null,
+        raw_text: input.rawText ?? null,
+        analysis: input.analysis ?? null,
+        status: input.status ?? "received",
+      },
+    ]),
+  });
+
+  return rows[0];
+}
+
+export async function updateLeadMaterialById(
+  materialId: string,
+  input: Partial<Pick<LeadMaterialInsertInput, "analysis" | "status" | "rawText">>,
+) {
+  const payload: Record<string, string | null> = {};
+
+  if (input.analysis !== undefined) {
+    payload.analysis = input.analysis;
+  }
+  if (input.status !== undefined) {
+    payload.status = input.status;
+  }
+  if (input.rawText !== undefined) {
+    payload.raw_text = input.rawText;
+  }
+
+  const rows = await supabaseRequest<SupabaseLeadMaterialRow[]>(
+    `lead_materials?id=eq.${encodeURIComponent(materialId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return rows[0] ?? null;
+}
+
 export async function createLead(input: LeadUpsertInput) {
   const rows = await supabaseRequest<SupabaseLeadRow[]>("leads", {
     method: "POST",
@@ -328,5 +413,6 @@ export type {
   SupabaseExpertOfferRow,
   SupabaseExpertProfileRow,
   SupabaseLeadRow,
+  SupabaseLeadMaterialRow,
   SupabaseMessageRow,
 };

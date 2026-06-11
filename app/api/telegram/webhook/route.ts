@@ -1,16 +1,38 @@
 import {
   createLead,
+  createLeadMaterial,
   getActiveExpertFaq,
   getActiveExpertObjections,
   getActiveExpertOffers,
   getActiveExpertProfile,
   getLeadByTelegramUserId,
+  getLeadMaterialsCount,
   getRecentMessagesByLeadId,
   insertMessage,
+  updateLeadMaterialById,
   updateLeadById,
+  type SupabaseExpertProfileRow,
+  type SupabaseLeadRow,
 } from "@/lib/supabase-rest";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
+import {
+  AFTER_HANDOFF_TEXT,
+  DEEP_FOLLOWUP_TEXT,
+  MATERIAL_LIMIT_TEXT,
+  MATERIALS_REQUEST_TEXT,
+  MAX_MATERIALS_PER_LEAD,
+  MAX_PDF_BYTES,
+  PDF_TEXT_EXTRACTION_FAILED_TEXT,
+  PDF_TOO_LARGE_TEXT,
+  POST_QUIZ_STAGES,
+  buildMaterialAnalysis,
+  detectHandoffConsent,
+  extractPdfTextFromArrayBuffer,
+  extractTextMaterial,
+  extractUrlMaterial,
+  isPostQuizStage,
+} from "@/lib/neiroclozer/materials-analysis";
 import {
   buildInvalidMarketingRoiQuizAnswerText,
   buildMarketingRoiQuizVerdict,
@@ -24,10 +46,13 @@ import {
 } from "@/lib/neiroclozer/marketing-roi-quiz";
 import {
   answerCallbackQuery,
+  getTelegramFileDownloadUrl,
   parseTelegramPrivateTextMessage,
   sendTextMessage,
   verifyTelegramWebhookSecret,
 } from "@/lib/telegram";
+
+export const runtime = "nodejs";
 
 function buildGiftText(giftMessage: string, giftUrl: string) {
   return `${giftMessage}\n\n${giftUrl}`;
@@ -119,6 +144,38 @@ function extractRecentMarketingRoiQuizAnswers(messages: { direction: string; tex
     .map((message) => parseMarketingRoiQuizAnswer(message.text))
     .filter((answer): answer is MarketingRoiQuizAnswerKey => Boolean(answer))
     .slice(-3);
+}
+
+async function sendAndStoreAiReply(chatId: number, leadId: string, expertProfileId: string, text: string) {
+  const result = await sendTextMessage(chatId, text);
+
+  await insertMessage({
+    leadId,
+    expertProfileId,
+    direction: "outgoing",
+    channel: "telegram",
+    telegramMessageId: result.telegramMessageId,
+    text,
+    messageType: "ai_reply",
+  });
+
+  return result;
+}
+
+async function sendAndStorePlainText(chatId: number, leadId: string, expertProfileId: string, text: string) {
+  const result = await sendTextMessage(chatId, text);
+
+  await insertMessage({
+    leadId,
+    expertProfileId,
+    direction: "outgoing",
+    channel: "telegram",
+    telegramMessageId: result.telegramMessageId,
+    text,
+    messageType: "ai_reply",
+  });
+
+  return result;
 }
 
 function hasAnyKeyword(text: string, keywords: string[]) {
@@ -318,6 +375,157 @@ function detectCurrentStage(
   return existingStage || "qualification_in_progress";
 }
 
+type IncomingTelegramMessage = NonNullable<ReturnType<typeof parseTelegramPrivateTextMessage>>;
+
+async function saveFailedPdfMaterial(leadId: string, incomingMessage: IncomingTelegramMessage) {
+  await createLeadMaterial({
+    leadId,
+    materialType: "pdf",
+    telegramFileId: incomingMessage.document?.fileId ?? null,
+    fileName: incomingMessage.document?.fileName ?? null,
+    status: "failed",
+  });
+}
+
+async function handlePostQuizMaterialsFlow(
+  incomingMessage: IncomingTelegramMessage,
+  lead: SupabaseLeadRow,
+  expertProfile: SupabaseExpertProfileRow,
+) {
+  const currentStage = lead.current_stage;
+
+  if (currentStage === POST_QUIZ_STAGES.handoff) {
+    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AFTER_HANDOFF_TEXT);
+    return;
+  }
+
+  if (
+    (currentStage === POST_QUIZ_STAGES.materialsAnalyzed || currentStage === POST_QUIZ_STAGES.auditOffered) &&
+    detectHandoffConsent(incomingMessage.text)
+  ) {
+    const handoffText =
+      "Да, передам Александру твои ответы и материалы. Дальше он посмотрит связку глубже и подскажет, где именно могут теряться заявки.";
+
+    await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, handoffText);
+    await updateLeadById(lead.id, {
+      status: "needs_manual_followup",
+      currentStage: POST_QUIZ_STAGES.handoff,
+      matchedOffer: "diagnostic",
+      warmthLevel: "hot",
+    });
+    return;
+  }
+
+  const materialsCount = await getLeadMaterialsCount(lead.id);
+  const hasDocument = Boolean(incomingMessage.document);
+
+  if (materialsCount >= MAX_MATERIALS_PER_LEAD) {
+    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIAL_LIMIT_TEXT);
+    await updateLeadById(lead.id, {
+      currentStage: POST_QUIZ_STAGES.auditOffered,
+      matchedOffer: "diagnostic",
+      warmthLevel: "warm",
+    });
+    return;
+  }
+
+  let material =
+    !hasDocument && ((await extractUrlMaterial(incomingMessage.text)) ?? extractTextMaterial(incomingMessage.text));
+
+  if (hasDocument) {
+    if (incomingMessage.document?.mimeType !== "application/pdf") {
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, MATERIALS_REQUEST_TEXT);
+      return;
+    }
+
+    if (incomingMessage.document.fileSize && incomingMessage.document.fileSize > MAX_PDF_BYTES) {
+      await saveFailedPdfMaterial(lead.id, incomingMessage);
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+      return;
+    }
+
+    const downloadUrl = await getTelegramFileDownloadUrl(incomingMessage.document.fileId);
+    const response = await fetch(downloadUrl);
+
+    if (!response.ok) {
+      throw new Error(`Telegram file download failed with status ${response.status}.`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    if (arrayBuffer.byteLength > MAX_PDF_BYTES) {
+      await saveFailedPdfMaterial(lead.id, incomingMessage);
+      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, PDF_TOO_LARGE_TEXT);
+      return;
+    }
+
+    const rawText = await extractPdfTextFromArrayBuffer(arrayBuffer);
+
+    if (!rawText) {
+      await saveFailedPdfMaterial(lead.id, incomingMessage);
+      await sendAndStorePlainText(
+        incomingMessage.telegramChatId,
+        lead.id,
+        expertProfile.id,
+        PDF_TEXT_EXTRACTION_FAILED_TEXT,
+      );
+      return;
+    }
+
+    material = {
+      materialType: "pdf" as const,
+      sourceUrl: null,
+      rawText,
+      telegramFileId: incomingMessage.document.fileId,
+      fileName: incomingMessage.document.fileName,
+    };
+  }
+
+  if (!material) {
+    const fallbackText =
+      currentStage === POST_QUIZ_STAGES.materialsRequested
+        ? MATERIALS_REQUEST_TEXT
+        : DEEP_FOLLOWUP_TEXT;
+    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, fallbackText);
+    return;
+  }
+
+  const savedMaterial = await createLeadMaterial({
+    leadId: lead.id,
+    materialType: material.materialType,
+    sourceUrl: material.sourceUrl ?? null,
+    telegramFileId: material.telegramFileId ?? null,
+    fileName: material.fileName ?? null,
+    rawText: material.rawText,
+    status: "received",
+  });
+
+  await updateLeadById(lead.id, {
+    currentStage: POST_QUIZ_STAGES.materialsReceived,
+    matchedOffer: "diagnostic",
+    warmthLevel: "warm",
+  });
+
+  const analysis = await buildMaterialAnalysis({
+    lead,
+    materialText: material.rawText,
+    materialType: material.materialType,
+  });
+
+  await updateLeadMaterialById(savedMaterial.id, {
+    analysis,
+    status: "analyzed",
+  });
+
+  await sendAndStoreAiReply(incomingMessage.telegramChatId, lead.id, expertProfile.id, analysis);
+  await updateLeadById(lead.id, {
+    status: "qualified",
+    currentStage: POST_QUIZ_STAGES.auditOffered,
+    matchedOffer: "diagnostic",
+    warmthLevel: "warm",
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const isSecretValid = await verifyTelegramWebhookSecret(request);
@@ -352,19 +560,20 @@ export async function POST(request: Request) {
     const entryFlowMode = getEntryFlowMode();
     const shouldRestartQuiz = Boolean(existingLead && entryFlowMode === "quiz" && isStartCommand(incomingMessage.text));
     const isExistingQuizStage = !shouldRestartQuiz && isMarketingRoiQuizStage(existingLead?.current_stage);
+    const isExistingPostQuizStage = !shouldRestartQuiz && isPostQuizStage(existingLead?.current_stage);
     const normalizedUserText = incomingMessage.text.toLowerCase();
     const hasBooked = hasBookedSignal(normalizedUserText);
     const hasPositiveReply = isShortPositiveReply(normalizedUserText);
     const matchedOffer = shouldRestartQuiz
       ? null
-      : isExistingQuizStage
+      : isExistingQuizStage || isExistingPostQuizStage
       ? existingLead?.matched_offer ?? null
       : detectFinalMatchedOffer(detectMatchedOffer(normalizedUserText), existingLead?.matched_offer, hasBooked);
     const manualFollowup = needsManualFollowup(normalizedUserText);
     const warmthLevel = detectWarmthLevel(normalizedUserText, matchedOffer, manualFollowup);
     const leadStatus = shouldRestartQuiz
       ? "active"
-      : isExistingQuizStage
+      : isExistingQuizStage || isExistingPostQuizStage
       ? existingLead?.status ?? "active"
       : hasBooked || (hasPositiveReply && (matchedOffer === "diagnostic" || manualFollowup))
         ? "qualified"
@@ -372,7 +581,7 @@ export async function POST(request: Request) {
     const currentStage =
       (isNewLead && entryFlowMode === "quiz") || shouldRestartQuiz
         ? MARKETING_ROI_QUIZ_STAGES.question1
-        : isExistingQuizStage
+        : isExistingQuizStage || isExistingPostQuizStage
           ? existingLead.current_stage
           : detectCurrentStage(
               matchedOffer,
@@ -538,18 +747,32 @@ export async function POST(request: Request) {
         messageType: "ai_reply",
       });
 
+      const materialsRequestResult = await sendTextMessage(incomingMessage.telegramChatId, MATERIALS_REQUEST_TEXT);
+
+      await insertMessage({
+        leadId: lead.id,
+        expertProfileId: expertProfile.id,
+        direction: "outgoing",
+        channel: "telegram",
+        telegramMessageId: materialsRequestResult.telegramMessageId,
+        text: MATERIALS_REQUEST_TEXT,
+        messageType: "qual_question",
+      });
+
       await updateLeadById(lead.id, {
         status: "qualified",
-        currentStage: MARKETING_ROI_QUIZ_STAGES.completed,
+        currentStage: POST_QUIZ_STAGES.materialsRequested,
         matchedOffer: "diagnostic",
         warmthLevel: "warm",
       });
+    } else if (isExistingPostQuizStage) {
+      await handlePostQuizMaterialsFlow(incomingMessage, updatedLead, expertProfile);
     } else {
       const [offers, faq, objections, messages] = await Promise.all([
         getActiveExpertOffers(expertProfile.id),
         getActiveExpertFaq(expertProfile.id),
         getActiveExpertObjections(expertProfile.id),
-        getRecentMessagesByLeadId(lead.id, 4),
+        getRecentMessagesByLeadId(lead.id, 10),
       ]);
 
       const prompt = buildNeiroPrompt({

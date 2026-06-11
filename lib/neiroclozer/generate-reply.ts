@@ -22,7 +22,7 @@ function extractResponseText(responseData: AnthropicResponse) {
   );
 }
 
-export async function generateNeiroReply(prompt: string) {
+export async function generateAnthropicText(prompt: string, maxTokens = MAX_REPLY_TOKENS) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
@@ -38,7 +38,7 @@ export async function generateNeiroReply(prompt: string) {
     },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
-      max_tokens: MAX_REPLY_TOKENS,
+      max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -56,4 +56,8 @@ export async function generateNeiroReply(prompt: string) {
   }
 
   return replyText.trim();
+}
+
+export async function generateNeiroReply(prompt: string) {
+  return generateAnthropicText(prompt, MAX_REPLY_TOKENS);
 }
