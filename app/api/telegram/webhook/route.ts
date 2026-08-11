@@ -8,6 +8,7 @@ import {
   getLeadByTelegramUserId,
   getLeadMaterialsCount,
   getRecentMessagesByLeadId,
+  getRuntimeSettings,
   insertMessage,
   updateLeadMaterialById,
   updateLeadById,
@@ -18,6 +19,7 @@ import {
   type LeadRow,
   type MessageRow,
 } from "@/lib/data-store";
+import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
@@ -67,12 +69,6 @@ function buildGiftText(giftMessage: string, giftUrl: string) {
 }
 
 const GIFT_FOLLOWUP_DELAY_MS = 15 * 60 * 1000;
-const DEFAULT_ENTRY_FLOW_MODE = "quiz";
-
-function getEntryFlowMode() {
-  return process.env.NEIRO_ENTRY_FLOW_MODE === "gift" ? "gift" : DEFAULT_ENTRY_FLOW_MODE;
-}
-
 function isStartCommand(text: string) {
   return text.trim().toLowerCase() === "/start";
 }
@@ -914,6 +910,10 @@ export async function POST(request: Request) {
       });
     }
 
+    if (await handleTelegramAdminMessage(incomingMessage)) {
+      return Response.json({ ok: true, admin: true });
+    }
+
     const expertProfile = await getActiveExpertProfile();
 
     if (!expertProfile) {
@@ -922,7 +922,7 @@ export async function POST(request: Request) {
 
     const existingLead = await getLeadByTelegramUserId(incomingMessage.telegramUserId);
     const isNewLead = !existingLead;
-    const entryFlowMode = getEntryFlowMode();
+    const entryFlowMode = (await getRuntimeSettings()).entryFlowMode;
     const shouldRestartQuiz = Boolean(existingLead && entryFlowMode === "quiz" && isStartCommand(incomingMessage.text));
     const isExistingQuizStage = !shouldRestartQuiz && isMarketingRoiQuizStage(existingLead?.current_stage);
     const isExistingPostQuizStage = !shouldRestartQuiz && isPostQuizStage(existingLead?.current_stage);

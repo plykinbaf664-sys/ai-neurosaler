@@ -2,6 +2,16 @@
 
 Telegram-first AI sales assistant on Next.js 16. The application runs without Supabase: expert knowledge, leads, message history, materials and follow-up state are stored by the local data layer in `lib/data-store.ts`.
 
+## Implemented changes
+
+- removed all runtime imports, requests and environment requirements related to Supabase;
+- replaced PostgREST with a typed local JSON store and serialized writes;
+- added a committed demonstration knowledge seed and mutable ignored runtime data;
+- preserved Telegram quiz, qualification, gift tracking, follow-ups, AI replies and material analysis;
+- added a runtime dashboard and `/api/status` health endpoint;
+- added an owner-only Telegram admin panel with statistics, dialogues, CSV lead export and safe runtime settings;
+- retained `supabase/sql` only as historical schema documentation.
+
 ## Current architecture
 
 ```text
@@ -49,6 +59,7 @@ Required for the Telegram flow:
 
 ```env
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_USER_ID=
 TELEGRAM_WEBHOOK_SECRET=
 ANTHROPIC_API_KEY=
 CRON_SECRET=
@@ -69,6 +80,19 @@ NEIRO_ENTRY_FLOW_MODE=quiz
 The default entry flow is the three-step marketing ROI quiz. Set `NEIRO_ENTRY_FLOW_MODE=gift` to use the legacy gift flow.
 
 `NEIRO_GIFT_URL` overrides the seed profile's `gift_url` at runtime. Set it before a client-facing demo; the committed seed intentionally contains a placeholder URL.
+
+## Telegram admin
+
+Set your numeric Telegram user ID in `TELEGRAM_ADMIN_USER_ID`, restart the app and send `/admin` to the bot. Admin commands are intercepted before the lead flow, so the owner is not created as a lead. Other Telegram users receive no administrative access.
+
+Available sections:
+
+- **Statistics** — total/new leads, qualification and conversion rates, dialogue and message counts;
+- **Leads CSV** — a document with Telegram usernames, names, statuses, stages, warmth, offer, message count and timestamps;
+- **Dialogues** — recent leads by username with the latest incoming and outgoing messages;
+- **Settings** — persistent `quiz/gift` entry-mode switching and gift follow-up enable/disable.
+
+Only whitelisted operational settings can be changed from Telegram; arbitrary environment variables and secrets are never exposed. Changes are persisted in `.data/neurosaler.json` and override their initial environment defaults.
 
 ## Run and verify
 

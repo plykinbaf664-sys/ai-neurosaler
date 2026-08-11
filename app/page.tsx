@@ -19,8 +19,9 @@ export default async function Home() {
   await connection();
   const store = await getLocalStoreSummary();
   const telegramReady = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+  const adminReady = Boolean(process.env.TELEGRAM_ADMIN_USER_ID);
   const aiReady = Boolean(process.env.ANTHROPIC_API_KEY);
-  const systemReady = Boolean(store.expert) && store.giftReady && telegramReady && aiReady;
+  const systemReady = Boolean(store.expert) && store.giftReady && telegramReady && adminReady && aiReady;
 
   const stats = [
     ["Офферы", store.offers],
@@ -80,6 +81,12 @@ export default async function Home() {
           <section className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-5 py-4 text-sm leading-6 text-amber-100">
             Перед клиентским показом задайте рабочую ссылку на подарок через <code>NEIRO_GIFT_URL</code> или
             замените <code>gift_url</code> в локальном файле данных.
+          </section>
+        ) : null}
+
+        {!adminReady ? (
+          <section className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-5 py-4 text-sm leading-6 text-amber-100">
+            Для доступа к Telegram-админке задайте свой числовой ID в <code>TELEGRAM_ADMIN_USER_ID</code>.
           </section>
         ) : null}
 

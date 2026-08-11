@@ -142,8 +142,14 @@ type MessageInsertInput = {
   messageType: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
 };
 
+type RuntimeSettings = {
+  entryFlowMode: "quiz" | "gift";
+  giftFollowupsEnabled: boolean;
+};
+
 type LocalDatabase = {
   version: number;
+  runtimeSettings?: RuntimeSettings;
   expertProfiles: ExpertProfileRow[];
   expertOffers: ExpertOfferRow[];
   expertFaq: ExpertFaqRow[];
@@ -503,6 +509,86 @@ export async function getLocalStoreSummary() {
   }));
 }
 
+function getDefaultRuntimeSettings(): RuntimeSettings {
+  return {
+    entryFlowMode: process.env.NEIRO_ENTRY_FLOW_MODE === "gift" ? "gift" : "quiz",
+    giftFollowupsEnabled: process.env.GIFT_FOLLOWUPS_ENABLED !== "false",
+  };
+}
+
+export async function getRuntimeSettings() {
+  return readDatabase((database) => database.runtimeSettings ?? getDefaultRuntimeSettings());
+}
+
+export async function updateRuntimeSettings(input: Partial<RuntimeSettings>) {
+  return mutateDatabase((database) => {
+    const current = database.runtimeSettings ?? getDefaultRuntimeSettings();
+    database.runtimeSettings = { ...current, ...input };
+    return database.runtimeSettings;
+  });
+}
+
+export async function getAdminOverview() {
+  return readDatabase((database) => {
+    const now = Date.now();
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const qualified = database.leads.filter((lead) =>
+      ["qualified", "needs_manual_followup"].includes(lead.status),
+    ).length;
+    const converted = database.leads.filter(
+      (lead) =>
+        lead.status === "needs_manual_followup" ||
+        /(booked|confirmed|handoff)/.test(lead.current_stage),
+    ).length;
+
+    return {
+      totalLeads: database.leads.length,
+      leadsToday: database.leads.filter((lead) => Date.parse(lead.created_at) >= dayAgo).length,
+      leadsWeek: database.leads.filter((lead) => Date.parse(lead.created_at) >= weekAgo).length,
+      qualified,
+      converted,
+      qualificationRate: database.leads.length ? Math.round((qualified / database.leads.length) * 100) : 0,
+      conversionRate: database.leads.length ? Math.round((converted / database.leads.length) * 100) : 0,
+      dialogues: new Set(database.messages.map((message) => message.lead_id)).size,
+      incomingMessages: database.messages.filter((message) => message.direction === "incoming").length,
+      outgoingMessages: database.messages.filter((message) => message.direction === "outgoing").length,
+    };
+  });
+}
+
+export async function getAdminLeads() {
+  return readDatabase((database) =>
+    [...database.leads]
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map((lead) => {
+        const messages = database.messages.filter((message) => message.lead_id === lead.id);
+        return {
+          ...lead,
+          messageCount: messages.length,
+          lastMessageAt: messages.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.created_at ?? null,
+        };
+      }),
+  );
+}
+
+export async function getRecentLeadDialogues(limit = 8) {
+  const leads = await getAdminLeads();
+  return leads.filter((lead) => lead.messageCount > 0).slice(0, limit);
+}
+
+export async function getLeadDialogue(leadId: string, limit = 12) {
+  return readDatabase((database) => {
+    const lead = database.leads.find((item) => item.id === leadId) ?? null;
+    const messages = database.messages
+      .filter((message) => message.lead_id === leadId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .reverse();
+    return { lead, messages };
+  });
+}
+
 export type {
   ExpertFaqRow,
   ExpertObjectionRow,
@@ -511,4 +597,5 @@ export type {
   LeadMaterialRow,
   LeadRow,
   MessageRow,
+  RuntimeSettings,
 };

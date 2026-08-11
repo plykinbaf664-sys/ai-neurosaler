@@ -21,6 +21,7 @@ export async function GET() {
       },
       integrations: {
         telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+        telegramAdmin: Boolean(process.env.TELEGRAM_ADMIN_USER_ID),
         ai: Boolean(process.env.ANTHROPIC_API_KEY),
         cron: Boolean(process.env.CRON_SECRET),
       },

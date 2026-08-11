@@ -1,4 +1,4 @@
-import { getDueGiftFollowupLeads, insertMessage, updateLeadById } from "@/lib/data-store";
+import { getDueGiftFollowupLeads, getRuntimeSettings, insertMessage, updateLeadById } from "@/lib/data-store";
 import { sendTextMessage } from "@/lib/telegram";
 
 const GIFT_FOLLOWUP_TEXT = "Получилось посмотреть видео?";
@@ -18,6 +18,12 @@ export async function GET(request: Request) {
   try {
     if (!isAuthorizedCronRequest(request)) {
       return Response.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+    }
+
+    const settings = await getRuntimeSettings();
+
+    if (!settings.giftFollowupsEnabled) {
+      return Response.json({ ok: true, disabled: true, processed: 0, sent: 0 });
     }
 
     const dueLeads = await getDueGiftFollowupLeads(new Date().toISOString());

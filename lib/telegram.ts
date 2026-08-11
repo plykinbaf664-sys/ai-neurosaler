@@ -347,3 +347,25 @@ export async function sendTextMessages(chatId: number, text: string, replyMarkup
 
   return results;
 }
+
+export async function sendDocument(chatId: number, content: string, fileName: string, caption?: string) {
+  const formData = new FormData();
+  formData.set("chat_id", String(chatId));
+  formData.set("document", new Blob([content], { type: "text/csv;charset=utf-8" }), fileName);
+
+  if (caption) {
+    formData.set("caption", caption);
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/sendDocument`, {
+    method: "POST",
+    body: formData,
+  });
+  const data = (await response.json()) as TelegramSendMessageResponse;
+
+  if (!response.ok || !data.ok || !data.result) {
+    throw new Error(data.description || "Telegram sendDocument failed.");
+  }
+
+  return { telegramMessageId: data.result.message_id };
+}
