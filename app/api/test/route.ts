@@ -7,7 +7,7 @@ import {
   getActiveExpertProfile,
   getLeadByTelegramUserId,
   getRecentMessagesByLeadId,
-} from "@/lib/supabase-rest";
+} from "@/lib/data-store";
 
 export async function GET(request: Request) {
   const telegramUserIdParam = new URL(request.url).searchParams.get("telegramUserId");

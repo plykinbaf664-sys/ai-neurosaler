@@ -1,4 +1,4 @@
-import type { SupabaseLeadRow } from "@/lib/supabase-rest";
+import type { LeadRow } from "@/lib/data-store";
 import {
   DEFAULT_MATERIAL_ANALYSIS_TOKENS,
   generateAnthropicText,
@@ -183,7 +183,7 @@ export async function extractPdfTextFromArrayBuffer(arrayBuffer: ArrayBuffer) {
 }
 
 export async function buildMaterialAnalysis(params: {
-  lead: SupabaseLeadRow;
+  lead: LeadRow;
   materialText: string;
   materialType: LeadMaterialType;
 }) {

@@ -1,4 +1,4 @@
-import { getLeadById, updateLeadById } from "@/lib/supabase-rest";
+import { getLeadById, updateLeadById } from "@/lib/data-store";
 
 function isSafeRedirect(value: string) {
   try {

@@ -1,161 +1,53 @@
-# AI Neurosaler / Neiroclozer
+# AI Neurosaler / NeuroSeller
 
-Standalone Next.js project for Neiroclozer, a Telegram-first AI sales assistant.
+Telegram-first AI sales assistant on Next.js 16. The application runs without Supabase: expert knowledge, leads, message history, materials and follow-up state are stored by the local data layer in `lib/data-store.ts`.
 
-The project was extracted from the larger AI Launch System app into a separate deployable application. It keeps the existing production logic: Telegram webhook, Supabase storage, prompt builder, AI reply flow, lead status logic, quiz entry flow, gift fallback flow, and gift follow-ups.
+## Current architecture
 
-## What Was Moved
+```text
+Telegram
+  -> POST /api/telegram/webhook
+  -> quiz / qualification / material analysis / AI reply
+  -> lib/data-store.ts
+  -> .data/neurosaler.json
+```
 
 Runtime routes:
 
 ```text
-app/api/telegram/webhook/route.ts
-app/api/gift/[leadId]/route.ts
-app/api/cron/gift-followups/route.ts
-app/api/test/route.ts
+GET  /                         runtime dashboard
+GET  /api/status               readiness and local counters
+POST /api/telegram/webhook     Telegram updates
+GET  /api/gift/[leadId]        tracked gift redirect
+GET  /api/cron/gift-followups  scheduled gift follow-ups
+GET  /api/test                 AI reply check for an existing lead
 ```
 
-Shared logic:
+## Local data
 
-```text
-lib/telegram.ts
-lib/supabase-rest.ts
-lib/neiroclozer/generate-reply.ts
-lib/neiroclozer/prompt-builder.ts
-lib/neiroclozer/marketing-roi-quiz.ts
-```
+The first local request copies `data/local-db.seed.json` to `.data/neurosaler.json`. All further leads, messages and materials are written to that working file. The `.data` directory is ignored by Git.
 
-Database migrations:
+Edit `data/local-db.seed.json` before the first run to change the expert profile, offers, FAQ, objections and gift URL. If `.data/neurosaler.json` already exists, edit that working file instead or move it away to initialize a fresh copy from the seed.
 
-```text
-supabase/sql/001_neiroclozer_v0_1.sql
-supabase/sql/002_expert_memory.sql
-supabase/sql/003_leads_enrichment.sql
-supabase/sql/004_gift_followup_tracking.sql
-supabase/sql/005_messages_message_type_expand.sql
-```
-
-Deployment config:
-
-```text
-vercel.json
-.env.example
-```
-
-## Main Flow
-
-Telegram sends updates to:
-
-```text
-/api/telegram/webhook
-```
-
-The webhook:
-
-1. verifies Telegram secret token when configured;
-2. parses private text messages and inline button callbacks;
-3. loads or creates a lead in Supabase;
-4. starts the default entry flow;
-5. stores incoming/outgoing messages;
-6. uses deterministic quiz logic during quiz stages;
-7. uses the prompt builder and AI reply flow after qualification.
-
-## Entry Flow Toggle
-
-The entry flow is controlled by:
+Modes:
 
 ```env
-NEIRO_ENTRY_FLOW_MODE=quiz
+LOCAL_DATA_MODE=file
 ```
 
-Supported modes:
+- `file` is the default outside Vercel and preserves data between restarts.
+- `memory` stores data only for the lifetime of the Node.js process.
+- when `LOCAL_DATA_MODE` is omitted on Vercel, `memory` is selected automatically because the deployment filesystem is not persistent.
 
-```text
-quiz  default marketing ROI quiz
-gift  legacy gift flow
-```
+For a reliable live Telegram demonstration, run the app as a normal Node.js process with `LOCAL_DATA_MODE=file` and expose it through an HTTPS tunnel or a server with a persistent disk. Vercel memory mode is suitable only for a short UI/API smoke demo: serverless instances can restart or serve separate copies of state.
 
-If `NEIRO_ENTRY_FLOW_MODE` is missing or not equal to `gift`, the bot uses the quiz flow by default.
+## Environment
 
-## Quiz Flow
+Copy `.env.example` to `.env.local` and fill in the integrations used by the demo.
 
-Default flow: marketing ROI quiz.
-
-Stages:
-
-```text
-marketing_roi_quiz_q1
-marketing_roi_quiz_q2
-marketing_roi_quiz_q3
-marketing_roi_quiz_completed
-```
-
-The quiz has 3 questions with inline Telegram buttons. Answers are scored as:
-
-```text
-A = 0
-B = 1
-C = 2
-D = 3
-```
-
-After the third answer, the bot sends a verdict and sets:
-
-```text
-matched_offer = diagnostic
-current_stage = marketing_roi_quiz_completed
-```
-
-## Gift Flow
-
-The old gift flow is preserved and can be enabled with:
+Required for the Telegram flow:
 
 ```env
-NEIRO_ENTRY_FLOW_MODE=gift
-```
-
-Gift-related routes:
-
-```text
-/api/gift/[leadId]
-/api/cron/gift-followups
-```
-
-The gift redirect route tracks gift link clicks and redirects to the configured gift URL. The cron route sends scheduled gift follow-ups.
-
-## Supabase Tables
-
-The app expects these Supabase tables:
-
-```text
-expert_profile
-expert_offers
-expert_faq
-expert_objections
-leads
-messages
-```
-
-Important `messages.message_type` values:
-
-```text
-user
-welcome
-gift
-qual_question
-gift_followup
-ai_reply
-```
-
-## Environment Variables
-
-Use `.env.local` locally and Vercel Environment Variables in production.
-
-Required:
-
-```env
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_SECRET=
 ANTHROPIC_API_KEY=
@@ -165,35 +57,28 @@ CRON_SECRET=
 Recommended:
 
 ```env
-TELEGRAM_WEBHOOK_BASE_URL=https://ai-neurosaler.vercel.app
-PUBLIC_BASE_URL=https://ai-neurosaler.vercel.app
-NEXT_PUBLIC_APP_URL=https://ai-neurosaler.vercel.app
+TELEGRAM_WEBHOOK_BASE_URL=https://your-public-host.example
+PUBLIC_BASE_URL=https://your-public-host.example
+NEXT_PUBLIC_APP_URL=https://your-public-host.example
 ANTHROPIC_MODEL=
 CALENDAR_LINK=
+NEIRO_GIFT_URL=
 NEIRO_ENTRY_FLOW_MODE=quiz
 ```
 
-Do not commit real secrets. `.env.example` is only a template.
+The default entry flow is the three-step marketing ROI quiz. Set `NEIRO_ENTRY_FLOW_MODE=gift` to use the legacy gift flow.
 
-## Telegram Webhook
+`NEIRO_GIFT_URL` overrides the seed profile's `gift_url` at runtime. Set it before a client-facing demo; the committed seed intentionally contains a placeholder URL.
 
-Production webhook URL:
+## Run and verify
 
-```text
-https://ai-neurosaler.vercel.app/api/telegram/webhook
+```bash
+npm run dev
 ```
 
-The webhook must allow both text messages and inline button callbacks:
+Open `http://localhost:3000` for the runtime dashboard and `http://localhost:3000/api/status` for the JSON health check.
 
-```json
-["message", "callback_query"]
-```
-
-After changing Vercel env variables, redeploy the project before testing Telegram again.
-
-## Local Checks
-
-Run:
+Quality checks:
 
 ```bash
 npm run lint
@@ -201,31 +86,17 @@ npx tsc --noEmit
 npm run build
 ```
 
-Expected API routes in the production build:
+## Telegram smoke test
 
-```text
-/api/telegram/webhook
-/api/gift/[leadId]
-/api/cron/gift-followups
-/api/test
-```
+1. Start the app with a public HTTPS URL.
+2. Point the Telegram webhook to `/api/telegram/webhook` and allow `message` and `callback_query` updates.
+3. Send `/start` to the bot.
+4. Complete all three inline quiz questions.
+5. Send a text, URL or PDF material and verify the analysis and audit handoff.
+6. Refresh `/` and confirm that the lead/message/material counters increased.
 
-## Manual Smoke Test
+## Legacy database files
 
-1. Deploy the project to Vercel.
-2. Confirm all env variables are present in Vercel.
-3. Set Telegram webhook to the deployed `/api/telegram/webhook` URL.
-4. Send `/start` to the bot.
-5. Confirm the welcome message and quiz question appear.
-6. Press an inline answer button.
-7. Confirm the next question appears.
-8. Complete all 3 questions and confirm the verdict appears.
+The SQL files under `supabase/sql` are retained only as the historical schema and a migration reference. They are not imported or executed by the application. The runtime has no Supabase URL/key requirement and makes no Supabase network requests.
 
-## Current Production Notes
-
-- The project can reuse the existing Supabase database.
-- Telegram webhook is currently intended to point to this standalone project, not the old monolith.
-- The AI reply implementation currently uses Anthropic via `ANTHROPIC_API_KEY`.
-- `SUPABASE_SERVICE_ROLE_KEY` is required because the API routes use server-side Supabase REST access.
-
-!!!!!!
+See `docs/storage-audit.md` for the dependency audit, entity mapping and operational limitations.

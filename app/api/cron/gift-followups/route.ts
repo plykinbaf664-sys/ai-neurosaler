@@ -1,4 +1,4 @@
-import { getDueGiftFollowupLeads, insertMessage, updateLeadById } from "@/lib/supabase-rest";
+import { getDueGiftFollowupLeads, insertMessage, updateLeadById } from "@/lib/data-store";
 import { sendTextMessage } from "@/lib/telegram";
 
 const GIFT_FOLLOWUP_TEXT = "Получилось посмотреть видео?";

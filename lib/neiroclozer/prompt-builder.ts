@@ -1,19 +1,19 @@
 import type {
-  SupabaseExpertFaqRow,
-  SupabaseExpertObjectionRow,
-  SupabaseExpertOfferRow,
-  SupabaseExpertProfileRow,
-  SupabaseLeadRow,
-  SupabaseMessageRow,
-} from "@/lib/supabase-rest";
+  ExpertFaqRow,
+  ExpertObjectionRow,
+  ExpertOfferRow,
+  ExpertProfileRow,
+  LeadRow,
+  MessageRow,
+} from "@/lib/data-store";
 
 type BuildNeiroPromptParams = {
-  expert: SupabaseExpertProfileRow;
-  offers: SupabaseExpertOfferRow[];
-  faq: SupabaseExpertFaqRow[];
-  objections: SupabaseExpertObjectionRow[];
-  lead: SupabaseLeadRow;
-  messages: SupabaseMessageRow[];
+  expert: ExpertProfileRow;
+  offers: ExpertOfferRow[];
+  faq: ExpertFaqRow[];
+  objections: ExpertObjectionRow[];
+  lead: LeadRow;
+  messages: MessageRow[];
 };
 
 const MAX_SECTION_LENGTH = 320;
@@ -35,7 +35,7 @@ function truncateText(value: string | null | undefined, maxLength: number, fallb
   return `${normalized.slice(0, maxLength).trim()}...`;
 }
 
-function formatOffers(offers: SupabaseExpertOfferRow[]) {
+function formatOffers(offers: ExpertOfferRow[]) {
   if (offers.length === 0) {
     return "none";
   }
@@ -49,7 +49,7 @@ function formatOffers(offers: SupabaseExpertOfferRow[]) {
     .join("\n");
 }
 
-function formatFaq(faq: SupabaseExpertFaqRow[]) {
+function formatFaq(faq: ExpertFaqRow[]) {
   if (faq.length === 0) {
     return "none";
   }
@@ -63,7 +63,7 @@ function formatFaq(faq: SupabaseExpertFaqRow[]) {
     .join("\n");
 }
 
-function formatObjections(objections: SupabaseExpertObjectionRow[]) {
+function formatObjections(objections: ExpertObjectionRow[]) {
   if (objections.length === 0) {
     return "none";
   }
@@ -77,7 +77,7 @@ function formatObjections(objections: SupabaseExpertObjectionRow[]) {
     .join("\n");
 }
 
-function formatMessages(messages: SupabaseMessageRow[]) {
+function formatMessages(messages: MessageRow[]) {
   if (messages.length === 0) {
     return "none";
   }

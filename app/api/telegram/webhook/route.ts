@@ -11,13 +11,13 @@ import {
   insertMessage,
   updateLeadMaterialById,
   updateLeadById,
-  type SupabaseExpertFaqRow,
-  type SupabaseExpertObjectionRow,
-  type SupabaseExpertOfferRow,
-  type SupabaseExpertProfileRow,
-  type SupabaseLeadRow,
-  type SupabaseMessageRow,
-} from "@/lib/supabase-rest";
+  type ExpertFaqRow,
+  type ExpertObjectionRow,
+  type ExpertOfferRow,
+  type ExpertProfileRow,
+  type LeadRow,
+  type MessageRow,
+} from "@/lib/data-store";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
@@ -241,12 +241,12 @@ async function sendAndStorePlainTextWithMarkup(
 
 async function sendAndStoreKnowledgeReply(params: {
   chatId: number;
-  lead: SupabaseLeadRow;
-  expertProfile: SupabaseExpertProfileRow;
-  offers: SupabaseExpertOfferRow[];
-  faq: SupabaseExpertFaqRow[];
-  objections: SupabaseExpertObjectionRow[];
-  messages: SupabaseMessageRow[];
+  lead: LeadRow;
+  expertProfile: ExpertProfileRow;
+  offers: ExpertOfferRow[];
+  faq: ExpertFaqRow[];
+  objections: ExpertObjectionRow[];
+  messages: MessageRow[];
 }) {
   const prompt = buildNeiroPrompt({
     expert: params.expertProfile,
@@ -539,12 +539,12 @@ async function saveFailedPdfMaterial(leadId: string, incomingMessage: IncomingTe
 
 async function handlePostQuizMaterialsFlow(
   incomingMessage: IncomingTelegramMessage,
-  lead: SupabaseLeadRow,
-  expertProfile: SupabaseExpertProfileRow,
-  offers: SupabaseExpertOfferRow[],
-  faq: SupabaseExpertFaqRow[],
-  objections: SupabaseExpertObjectionRow[],
-  messages: SupabaseMessageRow[],
+  lead: LeadRow,
+  expertProfile: ExpertProfileRow,
+  offers: ExpertOfferRow[],
+  faq: ExpertFaqRow[],
+  objections: ExpertObjectionRow[],
+  messages: MessageRow[],
   intent: ReturnType<typeof detectPostQuizIntent>,
   recentIncomingCount: number,
 ) {
@@ -947,7 +947,7 @@ export async function POST(request: Request) {
       (isNewLead && entryFlowMode === "quiz") || shouldRestartQuiz
         ? MARKETING_ROI_QUIZ_STAGES.question1
         : isExistingQuizStage || isExistingPostQuizStage
-          ? existingLead.current_stage
+          ? existingLead?.current_stage ?? MARKETING_ROI_QUIZ_STAGES.question1
           : detectCurrentStage(
               matchedOffer,
               manualFollowup,

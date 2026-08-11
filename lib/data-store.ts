@@ -1,0 +1,514 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import seedDatabase from "@/data/local-db.seed.json";
+
+type LeadRow = {
+  id: string;
+  expert_profile_id: string | null;
+  telegram_user_id: number;
+  telegram_chat_id: number;
+  telegram_username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  source: string;
+  status: string;
+  current_stage: string;
+  matched_offer: string | null;
+  last_user_message: string | null;
+  warmth_level: string;
+  gift_link_clicked_at: string | null;
+  gift_followup_due_at: string | null;
+  gift_followup_sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ExpertProfileRow = {
+  id: string;
+  is_active: boolean;
+  expert_name: string;
+  brand_name: string | null;
+  role_description: string | null;
+  core_positioning: string | null;
+  target_audience: string | null;
+  communication_rules: string | null;
+  do_not_say_rules: string | null;
+  welcome_message: string;
+  gift_message: string;
+  gift_type: "link";
+  gift_url: string;
+  first_qual_question: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ExpertOfferRow = {
+  id: string;
+  expert_profile_id: string;
+  title: string;
+  description: string | null;
+  price_text: string | null;
+  cta_text: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type ExpertFaqRow = {
+  id: string;
+  expert_profile_id: string;
+  question: string;
+  answer: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type ExpertObjectionRow = {
+  id: string;
+  expert_profile_id: string;
+  objection: string;
+  response: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type MessageRow = {
+  id: string;
+  lead_id: string;
+  expert_profile_id: string | null;
+  direction: "incoming" | "outgoing";
+  channel: "telegram";
+  telegram_message_id: number | null;
+  text: string;
+  message_type: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
+  created_at: string;
+};
+
+type LeadMaterialRow = {
+  id: string;
+  lead_id: string | null;
+  material_type: "pdf" | "url" | "text" | "unknown";
+  source_url: string | null;
+  telegram_file_id: string | null;
+  file_name: string | null;
+  raw_text: string | null;
+  analysis: string | null;
+  status: "received" | "analyzed" | "failed";
+  created_at: string;
+};
+
+type LeadUpsertInput = {
+  expertProfileId: string | null;
+  telegramUserId: number;
+  telegramChatId: number;
+  telegramUsername: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  source: string;
+  status: string;
+  currentStage: string;
+  matchedOffer: string | null;
+  lastUserMessage: string | null;
+  warmthLevel: string;
+  giftLinkClickedAt?: string | null;
+  giftFollowupDueAt?: string | null;
+  giftFollowupSentAt?: string | null;
+};
+
+type LeadMaterialInsertInput = {
+  leadId: string;
+  materialType: "pdf" | "url" | "text" | "unknown";
+  sourceUrl?: string | null;
+  telegramFileId?: string | null;
+  fileName?: string | null;
+  rawText?: string | null;
+  analysis?: string | null;
+  status?: "received" | "analyzed" | "failed";
+};
+
+type MessageInsertInput = {
+  leadId: string;
+  expertProfileId: string | null;
+  direction: "incoming" | "outgoing";
+  channel: "telegram";
+  telegramMessageId: number | null;
+  text: string;
+  messageType: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
+};
+
+type LocalDatabase = {
+  version: number;
+  expertProfiles: ExpertProfileRow[];
+  expertOffers: ExpertOfferRow[];
+  expertFaq: ExpertFaqRow[];
+  expertObjections: ExpertObjectionRow[];
+  leads: LeadRow[];
+  messages: MessageRow[];
+  leadMaterials: LeadMaterialRow[];
+};
+
+type LocalStoreRuntime = {
+  databasePromise: Promise<LocalDatabase> | null;
+  writeQueue: Promise<void>;
+};
+
+const runtimeKey = Symbol.for("ai-neurosaler.local-store");
+const globalWithStore = globalThis as typeof globalThis & {
+  [runtimeKey]?: LocalStoreRuntime;
+};
+
+function getRuntime() {
+  globalWithStore[runtimeKey] ??= {
+    databasePromise: null,
+    writeQueue: Promise.resolve(),
+  };
+
+  return globalWithStore[runtimeKey];
+}
+
+function getStoreMode() {
+  if (process.env.LOCAL_DATA_MODE === "memory" || process.env.LOCAL_DATA_MODE === "file") {
+    return process.env.LOCAL_DATA_MODE;
+  }
+
+  return process.env.VERCEL ? "memory" : "file";
+}
+
+function getDataFilePath() {
+  return path.join(process.cwd(), ".data", "neurosaler.json");
+}
+
+function cloneSeedDatabase() {
+  return structuredClone(seedDatabase) as LocalDatabase;
+}
+
+function applyEnvironmentOverrides(database: LocalDatabase) {
+  const activeProfile = database.expertProfiles.find((profile) => profile.is_active);
+  const giftUrl = process.env.NEIRO_GIFT_URL?.trim();
+
+  if (activeProfile && giftUrl) {
+    activeProfile.gift_url = giftUrl;
+  }
+
+  return database;
+}
+
+function isConfiguredUrl(value: string | null | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname !== "example.com";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalDatabase(value: unknown): value is LocalDatabase {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const database = value as Partial<LocalDatabase>;
+  return (
+    database.version === 1 &&
+    Array.isArray(database.expertProfiles) &&
+    Array.isArray(database.expertOffers) &&
+    Array.isArray(database.expertFaq) &&
+    Array.isArray(database.expertObjections) &&
+    Array.isArray(database.leads) &&
+    Array.isArray(database.messages) &&
+    Array.isArray(database.leadMaterials)
+  );
+}
+
+async function persistDatabase(database: LocalDatabase) {
+  if (getStoreMode() === "memory") {
+    return;
+  }
+
+  const dataFilePath = getDataFilePath();
+  await mkdir(path.dirname(dataFilePath), { recursive: true });
+  await writeFile(dataFilePath, `${JSON.stringify(database, null, 2)}\n`, "utf8");
+}
+
+async function loadDatabase() {
+  if (getStoreMode() === "memory") {
+    return applyEnvironmentOverrides(cloneSeedDatabase());
+  }
+
+  const dataFilePath = getDataFilePath();
+
+  try {
+    const parsed = JSON.parse(await readFile(dataFilePath, "utf8")) as unknown;
+
+    if (!isLocalDatabase(parsed)) {
+      throw new Error(`Unsupported local data schema in ${dataFilePath}.`);
+    }
+
+    return applyEnvironmentOverrides(parsed);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : null;
+
+    if (code !== "ENOENT") {
+      throw error;
+    }
+
+    const database = applyEnvironmentOverrides(cloneSeedDatabase());
+    await persistDatabase(database);
+    return database;
+  }
+}
+
+async function getDatabase() {
+  const runtime = getRuntime();
+  runtime.databasePromise ??= loadDatabase();
+  return runtime.databasePromise;
+}
+
+async function readDatabase<T>(reader: (database: LocalDatabase) => T) {
+  const runtime = getRuntime();
+  await runtime.writeQueue;
+  return reader(await getDatabase());
+}
+
+async function mutateDatabase<T>(mutator: (database: LocalDatabase) => T) {
+  const runtime = getRuntime();
+  const previousWrite = runtime.writeQueue;
+  let releaseWrite: () => void = () => undefined;
+  runtime.writeQueue = new Promise<void>((resolve) => {
+    releaseWrite = resolve;
+  });
+
+  await previousWrite;
+
+  try {
+    const database = await getDatabase();
+    const result = mutator(database);
+    await persistDatabase(database);
+    return result;
+  } finally {
+    releaseWrite();
+  }
+}
+
+export async function getActiveExpertProfile() {
+  return readDatabase((database) => database.expertProfiles.find((profile) => profile.is_active) ?? null);
+}
+
+export async function getActiveExpertOffers(expertProfileId: string) {
+  return readDatabase((database) =>
+    database.expertOffers
+      .filter((offer) => offer.expert_profile_id === expertProfileId && offer.is_active)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+  );
+}
+
+export async function getActiveExpertFaq(expertProfileId: string) {
+  return readDatabase((database) =>
+    database.expertFaq
+      .filter((item) => item.expert_profile_id === expertProfileId && item.is_active)
+      .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
+  );
+}
+
+export async function getActiveExpertObjections(expertProfileId: string) {
+  return readDatabase((database) =>
+    database.expertObjections
+      .filter((item) => item.expert_profile_id === expertProfileId && item.is_active)
+      .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
+  );
+}
+
+export async function getLeadByTelegramUserId(telegramUserId: number) {
+  return readDatabase(
+    (database) => database.leads.find((lead) => lead.telegram_user_id === telegramUserId) ?? null,
+  );
+}
+
+export async function getLeadById(leadId: string) {
+  return readDatabase((database) => database.leads.find((lead) => lead.id === leadId) ?? null);
+}
+
+export async function getDueGiftFollowupLeads(nowIso: string, limit = 20) {
+  return readDatabase((database) =>
+    database.leads
+      .filter(
+        (lead) =>
+          Boolean(lead.gift_followup_due_at) &&
+          lead.gift_followup_due_at! <= nowIso &&
+          !lead.gift_link_clicked_at &&
+          !lead.gift_followup_sent_at,
+      )
+      .sort((a, b) => a.gift_followup_due_at!.localeCompare(b.gift_followup_due_at!))
+      .slice(0, limit),
+  );
+}
+
+export async function getRecentMessagesByLeadId(leadId: string, limit = 10) {
+  return readDatabase((database) =>
+    database.messages
+      .filter((message) => message.lead_id === leadId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit),
+  );
+}
+
+export async function getLeadMaterialsCount(leadId: string) {
+  return readDatabase(
+    (database) => database.leadMaterials.filter((material) => material.lead_id === leadId).length,
+  );
+}
+
+export async function createLeadMaterial(input: LeadMaterialInsertInput) {
+  return mutateDatabase((database) => {
+    const material: LeadMaterialRow = {
+      id: randomUUID(),
+      lead_id: input.leadId,
+      material_type: input.materialType,
+      source_url: input.sourceUrl ?? null,
+      telegram_file_id: input.telegramFileId ?? null,
+      file_name: input.fileName ?? null,
+      raw_text: input.rawText ?? null,
+      analysis: input.analysis ?? null,
+      status: input.status ?? "received",
+      created_at: new Date().toISOString(),
+    };
+
+    database.leadMaterials.push(material);
+    return material;
+  });
+}
+
+export async function updateLeadMaterialById(
+  materialId: string,
+  input: Partial<Pick<LeadMaterialInsertInput, "analysis" | "status" | "rawText">>,
+) {
+  return mutateDatabase((database) => {
+    const material = database.leadMaterials.find((item) => item.id === materialId);
+
+    if (!material) {
+      return null;
+    }
+
+    if (input.analysis !== undefined) material.analysis = input.analysis;
+    if (input.status !== undefined) material.status = input.status;
+    if (input.rawText !== undefined) material.raw_text = input.rawText;
+    return material;
+  });
+}
+
+export async function createLead(input: LeadUpsertInput) {
+  return mutateDatabase((database) => {
+    const existingLead = database.leads.find((lead) => lead.telegram_user_id === input.telegramUserId);
+
+    if (existingLead) {
+      throw new Error(`Lead for Telegram user ${input.telegramUserId} already exists.`);
+    }
+
+    const now = new Date().toISOString();
+    const lead: LeadRow = {
+      id: randomUUID(),
+      expert_profile_id: input.expertProfileId,
+      telegram_user_id: input.telegramUserId,
+      telegram_chat_id: input.telegramChatId,
+      telegram_username: input.telegramUsername,
+      first_name: input.firstName,
+      last_name: input.lastName,
+      source: input.source,
+      status: input.status,
+      current_stage: input.currentStage,
+      matched_offer: input.matchedOffer,
+      last_user_message: input.lastUserMessage,
+      warmth_level: input.warmthLevel,
+      gift_link_clicked_at: input.giftLinkClickedAt ?? null,
+      gift_followup_due_at: input.giftFollowupDueAt ?? null,
+      gift_followup_sent_at: input.giftFollowupSentAt ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    database.leads.push(lead);
+    return lead;
+  });
+}
+
+export async function updateLeadById(leadId: string, input: Partial<LeadUpsertInput>) {
+  return mutateDatabase((database) => {
+    const lead = database.leads.find((item) => item.id === leadId);
+
+    if (!lead) {
+      return null;
+    }
+
+    if (input.expertProfileId !== undefined) lead.expert_profile_id = input.expertProfileId;
+    if (input.telegramUserId !== undefined) lead.telegram_user_id = input.telegramUserId;
+    if (input.telegramChatId !== undefined) lead.telegram_chat_id = input.telegramChatId;
+    if (input.telegramUsername !== undefined) lead.telegram_username = input.telegramUsername;
+    if (input.firstName !== undefined) lead.first_name = input.firstName;
+    if (input.lastName !== undefined) lead.last_name = input.lastName;
+    if (input.source !== undefined) lead.source = input.source;
+    if (input.status !== undefined) lead.status = input.status;
+    if (input.currentStage !== undefined) lead.current_stage = input.currentStage;
+    if (input.matchedOffer !== undefined) lead.matched_offer = input.matchedOffer;
+    if (input.lastUserMessage !== undefined) lead.last_user_message = input.lastUserMessage;
+    if (input.warmthLevel !== undefined) lead.warmth_level = input.warmthLevel;
+    if (input.giftLinkClickedAt !== undefined) lead.gift_link_clicked_at = input.giftLinkClickedAt;
+    if (input.giftFollowupDueAt !== undefined) lead.gift_followup_due_at = input.giftFollowupDueAt;
+    if (input.giftFollowupSentAt !== undefined) lead.gift_followup_sent_at = input.giftFollowupSentAt;
+    lead.updated_at = new Date().toISOString();
+    return lead;
+  });
+}
+
+export async function insertMessage(input: MessageInsertInput) {
+  return mutateDatabase((database) => {
+    const message: MessageRow = {
+      id: randomUUID(),
+      lead_id: input.leadId,
+      expert_profile_id: input.expertProfileId,
+      direction: input.direction,
+      channel: input.channel,
+      telegram_message_id: input.telegramMessageId,
+      text: input.text,
+      message_type: input.messageType,
+      created_at: new Date().toISOString(),
+    };
+
+    database.messages.push(message);
+    return message;
+  });
+}
+
+export async function getLocalStoreSummary() {
+  return readDatabase((database) => ({
+    mode: getStoreMode(),
+    file: getStoreMode() === "file" ? getDataFilePath() : null,
+    expert: database.expertProfiles.find((profile) => profile.is_active)?.expert_name ?? null,
+    giftReady: isConfiguredUrl(database.expertProfiles.find((profile) => profile.is_active)?.gift_url),
+    offers: database.expertOffers.filter((offer) => offer.is_active).length,
+    faq: database.expertFaq.filter((item) => item.is_active).length,
+    objections: database.expertObjections.filter((item) => item.is_active).length,
+    leads: database.leads.length,
+    messages: database.messages.length,
+    materials: database.leadMaterials.length,
+  }));
+}
+
+export type {
+  ExpertFaqRow,
+  ExpertObjectionRow,
+  ExpertOfferRow,
+  ExpertProfileRow,
+  LeadMaterialRow,
+  LeadRow,
+  MessageRow,
+};
