@@ -7,6 +7,10 @@ export function isLibraryEnabled() {
   return process.env.LIBRARY_ENABLED === "true";
 }
 
+export function isLibraryLinkSecretConfigured() {
+  return (process.env.LIBRARY_LINK_SECRET?.trim().length ?? 0) >= 24;
+}
+
 export function getLibraryCategory(category: string) {
   return LIBRARY_CATEGORIES.find((item) => item.slug === category) ?? null;
 }

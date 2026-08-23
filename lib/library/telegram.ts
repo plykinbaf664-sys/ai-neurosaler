@@ -123,7 +123,13 @@ async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, 
     message.telegramChatId,
     lead,
     expertProfileId,
-    "Выбери направление, с которого хочешь начать:",
+    [
+      "**Привет! Ты в Neiroclozer — AI-навигаторе по экосистеме Александра.**",
+      "",
+      "Наша задача — помочь тебе не просто попробовать AI, а найти, где он реально улучшит жизнь, работу или бизнес: сэкономит время, уберёт рутину и покажет новые точки роста.",
+      "",
+      "Выбери, с чего начнём:",
+    ].join("\n"),
     mainMenuMarkup(),
   );
 }

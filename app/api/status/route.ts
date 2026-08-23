@@ -1,4 +1,5 @@
 import { getLocalStoreSummary } from "@/lib/storage";
+import { isLibraryEnabled, isLibraryLinkSecretConfigured } from "@/lib/library/config";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,10 @@ export async function GET() {
         telegramAdmin: Boolean(process.env.TELEGRAM_ADMIN_USER_ID),
         ai: Boolean(process.env.ANTHROPIC_API_KEY),
         cron: Boolean(process.env.CRON_SECRET),
+      },
+      library: {
+        enabled: isLibraryEnabled(),
+        linkSecretConfigured: isLibraryLinkSecretConfigured(),
       },
     });
   } catch (error) {
