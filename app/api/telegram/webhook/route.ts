@@ -20,6 +20,7 @@ import {
   type MessageRow,
 } from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
+import { handleLibraryTelegramAction } from "@/lib/library/telegram";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
@@ -920,10 +921,26 @@ export async function POST(request: Request) {
       return Response.json({ ok: false, error: "Active expert_profile not found." }, { status: 500 });
     }
 
-    const existingLead = await getLeadByTelegramUserId(incomingMessage.telegramUserId);
+    let existingLead = await getLeadByTelegramUserId(incomingMessage.telegramUserId);
+    const libraryAction = await handleLibraryTelegramAction({
+      message: incomingMessage,
+      expertProfile,
+      existingLead,
+      publicBaseUrl: getPublicBaseUrl(request),
+    });
+
+    if (libraryAction.handled) {
+      return Response.json({ ok: true, library: true });
+    }
+
+    existingLead = libraryAction.lead ?? existingLead;
     const isNewLead = !existingLead;
-    const entryFlowMode = (await getRuntimeSettings()).entryFlowMode;
-    const shouldRestartQuiz = Boolean(existingLead && entryFlowMode === "quiz" && isStartCommand(incomingMessage.text));
+    const entryFlowMode = libraryAction.startMarketing ? "quiz" : (await getRuntimeSettings()).entryFlowMode;
+    const shouldRestartQuiz = Boolean(
+      existingLead &&
+        entryFlowMode === "quiz" &&
+        (isStartCommand(incomingMessage.text) || libraryAction.startMarketing),
+    );
     const isExistingQuizStage = !shouldRestartQuiz && isMarketingRoiQuizStage(existingLead?.current_stage);
     const isExistingPostQuizStage = !shouldRestartQuiz && isPostQuizStage(existingLead?.current_stage);
     const normalizedUserText = incomingMessage.text.toLowerCase();
@@ -1066,11 +1083,11 @@ export async function POST(request: Request) {
       const answer = parseMarketingRoiQuizAnswer(incomingMessage.text);
 
       if (!answer) {
-        const invalidAnswerText = buildInvalidMarketingRoiQuizAnswerText(existingLead.current_stage);
+        const invalidAnswerText = buildInvalidMarketingRoiQuizAnswerText(updatedLead.current_stage);
         const invalidAnswerResult = await sendTextMessage(
           incomingMessage.telegramChatId,
           invalidAnswerText,
-          getMarketingRoiQuizKeyboard(existingLead.current_stage),
+          getMarketingRoiQuizKeyboard(updatedLead.current_stage),
         );
 
         await insertMessage({
@@ -1086,7 +1103,7 @@ export async function POST(request: Request) {
         return Response.json({ ok: true });
       }
 
-      const nextStage = getNextMarketingRoiQuizStage(existingLead.current_stage);
+      const nextStage = getNextMarketingRoiQuizStage(updatedLead.current_stage);
 
       if (nextStage !== MARKETING_ROI_QUIZ_STAGES.completed) {
         await sendMarketingRoiQuizQuestion(incomingMessage.telegramChatId, lead.id, expertProfile.id, nextStage);

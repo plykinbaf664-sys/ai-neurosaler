@@ -75,4 +75,11 @@ export const localStorageAdapter: StorageAdapter = {
   getLeadDialogue(leadId, limit = MAX_MESSAGE_HISTORY) {
     return localStore.getLeadDialogue(leadId, Math.min(limit, MAX_MESSAGE_HISTORY));
   },
+  getActiveLibraryMaterials: localStore.getActiveLibraryMaterials,
+  getLibraryMaterialById: localStore.getLibraryMaterialById,
+  getActiveLibraryMaterialBySlug: localStore.getActiveLibraryMaterialBySlug,
+  getLibraryProgress: localStore.getLibraryProgress,
+  upsertLibraryProgress: localStore.upsertLibraryProgress,
+  insertUserEvent: localStore.insertUserEvent,
+  hasUserEvent: localStore.hasUserEvent,
 };

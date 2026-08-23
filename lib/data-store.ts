@@ -147,6 +147,41 @@ type RuntimeSettings = {
   giftFollowupsEnabled: boolean;
 };
 
+type LibraryMaterialRow = {
+  id: string;
+  slug: string;
+  title: string;
+  short_description: string;
+  category: string;
+  topic: string;
+  url: string;
+  position: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type LibraryProgressStatus = "not_started" | "opened" | "completed";
+
+type LibraryProgressRow = {
+  id: string;
+  user_id: string;
+  material_id: string;
+  status: LibraryProgressStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+type UserEventRow = {
+  id: string;
+  user_id: string;
+  event_name: string;
+  material_id: string | null;
+  category: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 type LocalDatabase = {
   version: number;
   runtimeSettings?: RuntimeSettings;
@@ -157,6 +192,9 @@ type LocalDatabase = {
   leads: LeadRow[];
   messages: MessageRow[];
   leadMaterials: LeadMaterialRow[];
+  libraryMaterials: LibraryMaterialRow[];
+  libraryProgress: LibraryProgressRow[];
+  userEvents: UserEventRow[];
 };
 
 type LocalStoreRuntime = {
@@ -192,6 +230,14 @@ function getDataFilePath() {
 
 function cloneSeedDatabase() {
   return structuredClone(seedDatabase) as LocalDatabase;
+}
+
+function ensureLibraryCollections(database: LocalDatabase) {
+  const seed = cloneSeedDatabase();
+  database.libraryMaterials ??= seed.libraryMaterials ?? [];
+  database.libraryProgress ??= [];
+  database.userEvents ??= [];
+  return database;
 }
 
 function applyEnvironmentOverrides(database: LocalDatabase) {
@@ -260,7 +306,7 @@ async function loadDatabase() {
       throw new Error(`Unsupported local data schema in ${dataFilePath}.`);
     }
 
-    return applyEnvironmentOverrides(parsed);
+    return applyEnvironmentOverrides(ensureLibraryCollections(parsed));
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : null;
 
@@ -268,7 +314,7 @@ async function loadDatabase() {
       throw error;
     }
 
-    const database = applyEnvironmentOverrides(cloneSeedDatabase());
+    const database = applyEnvironmentOverrides(ensureLibraryCollections(cloneSeedDatabase()));
     await persistDatabase(database);
     return database;
   }
@@ -604,6 +650,102 @@ export async function getLeadDialogue(leadId: string, limit = 12) {
   });
 }
 
+export async function getActiveLibraryMaterials(category?: string) {
+  return readDatabase((database) =>
+    database.libraryMaterials
+      .filter((material) => material.is_active && (!category || material.category === category))
+      .sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at)),
+  );
+}
+
+export async function getLibraryMaterialById(materialId: string) {
+  return readDatabase(
+    (database) => database.libraryMaterials.find((material) => material.id === materialId) ?? null,
+  );
+}
+
+export async function getActiveLibraryMaterialBySlug(category: string, slug: string) {
+  return readDatabase(
+    (database) =>
+      database.libraryMaterials.find(
+        (material) => material.is_active && material.category === category && material.slug === slug,
+      ) ?? null,
+  );
+}
+
+export async function getLibraryProgress(userId: string, materialIds: string[]) {
+  const ids = new Set(materialIds);
+  return readDatabase((database) =>
+    database.libraryProgress.filter(
+      (progress) => progress.user_id === userId && ids.has(progress.material_id),
+    ),
+  );
+}
+
+export async function upsertLibraryProgress(
+  userId: string,
+  materialId: string,
+  status: LibraryProgressStatus,
+) {
+  return mutateDatabase((database) => {
+    const existing = database.libraryProgress.find(
+      (progress) => progress.user_id === userId && progress.material_id === materialId,
+    );
+    const rank: Record<LibraryProgressStatus, number> = { not_started: 0, opened: 1, completed: 2 };
+    const now = new Date().toISOString();
+
+    if (existing) {
+      if (rank[status] > rank[existing.status]) existing.status = status;
+      existing.updated_at = now;
+      return existing;
+    }
+
+    const progress: LibraryProgressRow = {
+      id: randomUUID(),
+      user_id: userId,
+      material_id: materialId,
+      status,
+      created_at: now,
+      updated_at: now,
+    };
+    database.libraryProgress.push(progress);
+    return progress;
+  });
+}
+
+export async function insertUserEvent(input: {
+  userId: string;
+  eventName: string;
+  materialId?: string | null;
+  category?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  return mutateDatabase((database) => {
+    const event: UserEventRow = {
+      id: randomUUID(),
+      user_id: input.userId,
+      event_name: input.eventName,
+      material_id: input.materialId ?? null,
+      category: input.category ?? null,
+      metadata: input.metadata ?? {},
+      created_at: new Date().toISOString(),
+    };
+    database.userEvents.push(event);
+    return event;
+  });
+}
+
+export async function hasUserEvent(userId: string, eventName: string, category?: string | null) {
+  return readDatabase((database) =>
+    database.userEvents.some(
+      (event) =>
+        event.user_id === userId &&
+        event.event_name === eventName &&
+        (category === undefined || event.category === category),
+    ),
+  );
+}
+
 export type {
   ExpertFaqRow,
   ExpertObjectionRow,
@@ -611,6 +753,9 @@ export type {
   ExpertProfileRow,
   LeadMaterialRow,
   LeadRow,
+  LibraryMaterialRow,
+  LibraryProgressRow,
+  LibraryProgressStatus,
   MessageRow,
   RuntimeSettings,
 };

@@ -107,6 +107,42 @@ export function getLeadDialogue(leadId: string, limit?: number) {
   return getStorageAdapter().getLeadDialogue(leadId, limit);
 }
 
+export function getActiveLibraryMaterials(category?: string) {
+  return getStorageAdapter().getActiveLibraryMaterials(category);
+}
+
+export function getLibraryMaterialById(materialId: string) {
+  return getStorageAdapter().getLibraryMaterialById(materialId);
+}
+
+export function getActiveLibraryMaterialBySlug(category: string, slug: string) {
+  return getStorageAdapter().getActiveLibraryMaterialBySlug(category, slug);
+}
+
+export function getLibraryProgress(userId: string, materialIds: string[]) {
+  return getStorageAdapter().getLibraryProgress(userId, materialIds);
+}
+
+export function upsertLibraryProgress(
+  userId: string,
+  materialId: string,
+  status: import("@/lib/storage/types").LibraryProgressStatus,
+) {
+  return getStorageAdapter().upsertLibraryProgress(userId, materialId, status);
+}
+
+export function insertUserEvent(input: import("@/lib/storage/types").UserEventInsertInput) {
+  return getStorageAdapter().insertUserEvent(input);
+}
+
+export function hasUserEvent(
+  userId: string,
+  eventName: import("@/lib/storage/types").UserEventName,
+  category?: string | null,
+) {
+  return getStorageAdapter().hasUserEvent(userId, eventName, category);
+}
+
 export type {
   AdminLeadRow,
   AdminOverview,
@@ -118,10 +154,16 @@ export type {
   LeadMaterialRow,
   LeadRow,
   LeadUpsertInput,
+  LibraryCategory,
+  LibraryMaterialRow,
+  LibraryProgressRow,
+  LibraryProgressStatus,
   MessageInsertInput,
   MessageRow,
   RuntimeSettings,
   StorageAdapter,
   StorageSummary,
   StoredRowRef,
+  UserEventInsertInput,
+  UserEventName,
 } from "@/lib/storage/types";

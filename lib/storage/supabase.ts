@@ -16,10 +16,14 @@ import type {
   LeadMaterialInsertInput,
   LeadRow,
   LeadUpsertInput,
+  LibraryMaterialRow,
+  LibraryProgressRow,
+  LibraryProgressStatus,
   MessageInsertInput,
   MessageRow,
   RuntimeSettings,
   StorageAdapter,
+  UserEventInsertInput,
 } from "@/lib/storage/types";
 
 const PROFILE_COLUMNS =
@@ -34,6 +38,9 @@ const LEAD_COLUMNS =
   "id,expert_profile_id,telegram_user_id,telegram_chat_id,telegram_username,first_name,last_name,source,status,current_stage,matched_offer,last_user_message,warmth_level,gift_link_clicked_at,gift_followup_due_at,gift_followup_sent_at,created_at,updated_at";
 const MESSAGE_COLUMNS =
   "id,lead_id,expert_profile_id,direction,channel,telegram_message_id,text,message_type,created_at";
+const LIBRARY_MATERIAL_COLUMNS =
+  "id,slug,title,short_description,category,topic,url,position,is_active,created_at,updated_at";
+const LIBRARY_PROGRESS_COLUMNS = "id,user_id,material_id,status,created_at,updated_at";
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -451,5 +458,85 @@ export const supabaseStorageAdapter: StorageAdapter = {
       this.getRecentMessagesByLeadId(leadId, Math.min(limit, MAX_MESSAGE_HISTORY)),
     ]);
     return { lead, messages: newestFirst.reverse() };
+  },
+  getActiveLibraryMaterials(category) {
+    return selectRows<LibraryMaterialRow>("library_materials", {
+      select: LIBRARY_MATERIAL_COLUMNS,
+      is_active: "eq.true",
+      ...(category ? { category: `eq.${category}` } : {}),
+      order: "position.asc,created_at.asc",
+      limit: 500,
+    });
+  },
+  getLibraryMaterialById(materialId) {
+    return selectOne<LibraryMaterialRow>("library_materials", {
+      select: LIBRARY_MATERIAL_COLUMNS,
+      id: `eq.${materialId}`,
+    });
+  },
+  getActiveLibraryMaterialBySlug(category, slug) {
+    return selectOne<LibraryMaterialRow>("library_materials", {
+      select: LIBRARY_MATERIAL_COLUMNS,
+      category: `eq.${category}`,
+      slug: `eq.${slug}`,
+      is_active: "eq.true",
+    });
+  },
+  getLibraryProgress(userId, materialIds) {
+    if (!materialIds.length) return Promise.resolve([]);
+    return selectRows<LibraryProgressRow>("library_progress", {
+      select: LIBRARY_PROGRESS_COLUMNS,
+      user_id: `eq.${userId}`,
+      material_id: `in.(${materialIds.join(",")})`,
+      limit: Math.min(materialIds.length, 500),
+    });
+  },
+  async upsertLibraryProgress(userId, materialId, status: LibraryProgressStatus) {
+    const [existing] = await this.getLibraryProgress(userId, [materialId]);
+    const rank: Record<LibraryProgressStatus, number> = { not_started: 0, opened: 1, completed: 2 };
+
+    if (existing && rank[existing.status] >= rank[status]) return existing;
+
+    const rows = (
+      await supabaseRequest<LibraryProgressRow[]>(
+        "library_progress",
+        { on_conflict: "user_id,material_id", select: LIBRARY_PROGRESS_COLUMNS },
+        {
+          method: "POST",
+          body: { user_id: userId, material_id: materialId, status },
+          prefer: "resolution=merge-duplicates,return=representation",
+        },
+      )
+    ).data;
+    return rows[0];
+  },
+  async insertUserEvent(input: UserEventInsertInput) {
+    const rows = (
+      await supabaseRequest<{ id: string }[]>(
+        "user_events",
+        { select: "id" },
+        {
+          method: "POST",
+          body: {
+            user_id: input.userId,
+            event_name: input.eventName,
+            material_id: input.materialId ?? null,
+            category: input.category ?? null,
+            metadata: input.metadata ?? {},
+          },
+          prefer: "return=representation",
+        },
+      )
+    ).data;
+    return rows[0];
+  },
+  async hasUserEvent(userId, eventName, category) {
+    return (
+      (await countRows("user_events", {
+        user_id: `eq.${userId}`,
+        event_name: `eq.${eventName}`,
+        ...(category === undefined ? {} : { category: category === null ? "is.null" : `eq.${category}` }),
+      })) > 0
+    );
   },
 };

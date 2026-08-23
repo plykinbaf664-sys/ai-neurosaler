@@ -171,6 +171,50 @@ export type AdminOverview = {
 export type AdminLeadRow = LeadRow & { messageCount: number; lastMessageAt: string | null };
 export type StoredRowRef = { id: string };
 
+export type LibraryCategory = string;
+
+export type LibraryMaterialRow = {
+  id: string;
+  slug: string;
+  title: string;
+  short_description: string;
+  category: LibraryCategory;
+  topic: string;
+  url: string;
+  position: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryProgressStatus = "not_started" | "opened" | "completed";
+
+export type LibraryProgressRow = {
+  id: string;
+  user_id: string;
+  material_id: string;
+  status: LibraryProgressStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserEventName =
+  | "library_opened"
+  | "category_selected"
+  | "material_opened"
+  | "material_completed"
+  | "next_material_clicked"
+  | "library_returned"
+  | "reward_unlocked";
+
+export type UserEventInsertInput = {
+  userId: string;
+  eventName: UserEventName;
+  materialId?: string | null;
+  category?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 export interface StorageAdapter {
   getActiveExpertProfile(): Promise<ExpertProfileRow | null>;
   getActiveExpertOffers(expertProfileId: string): Promise<ExpertOfferRow[]>;
@@ -196,4 +240,15 @@ export interface StorageAdapter {
   getAdminLeads(): Promise<AdminLeadRow[]>;
   getRecentLeadDialogues(limit?: number): Promise<AdminLeadRow[]>;
   getLeadDialogue(leadId: string, limit?: number): Promise<{ lead: LeadRow | null; messages: MessageRow[] }>;
+  getActiveLibraryMaterials(category?: string): Promise<LibraryMaterialRow[]>;
+  getLibraryMaterialById(materialId: string): Promise<LibraryMaterialRow | null>;
+  getActiveLibraryMaterialBySlug(category: string, slug: string): Promise<LibraryMaterialRow | null>;
+  getLibraryProgress(userId: string, materialIds: string[]): Promise<LibraryProgressRow[]>;
+  upsertLibraryProgress(
+    userId: string,
+    materialId: string,
+    status: LibraryProgressStatus,
+  ): Promise<LibraryProgressRow>;
+  insertUserEvent(input: UserEventInsertInput): Promise<StoredRowRef>;
+  hasUserEvent(userId: string, eventName: UserEventName, category?: string | null): Promise<boolean>;
 }

@@ -70,6 +70,17 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 The Supabase adapter uses explicit column lists, keeps only bounded message history and truncated extracted material text, and never uses Supabase Storage for PDFs or media.
 
+## Ecosystem library
+
+The optional Telegram/web library is isolated behind a feature flag. Apply `supabase/sql/007_library_foundation.sql`, set a random server-only signing secret of at least 24 characters, then enable it:
+
+```env
+LIBRARY_ENABLED=true
+LIBRARY_LINK_SECRET=replace-with-a-long-random-secret
+```
+
+With `LIBRARY_ENABLED=false` or when the variable is omitted, `/start` follows the existing marketing flow. When enabled, `/start` shows marketing, AI for life and AI for business. Material links contain a short-lived signed token and never expose a Telegram user ID.
+
 ## Environment
 
 Copy `.env.example` to `.env.local` and fill in the integrations used by the demo.

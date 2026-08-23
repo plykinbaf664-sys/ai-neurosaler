@@ -105,5 +105,61 @@
   ],
   "leads": [],
   "messages": [],
-  "leadMaterials": []
+  "leadMaterials": [],
+  "libraryMaterials": [
+    {
+      "id": "00000000-0000-4000-8001-000000000101",
+      "slug": "ai-life-start",
+      "title": "AI для повседневных задач",
+      "short_description": "Короткий старт: где AI может экономить время в обычной жизни.",
+      "category": "life",
+      "topic": "productivity",
+      "url": "/library/life/ai-life-start",
+      "position": 1,
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:01.000Z",
+      "updated_at": "2026-01-01T00:00:01.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8001-000000000102",
+      "slug": "ai-life-focus",
+      "title": "Фокус и личная продуктивность",
+      "short_description": "Как использовать AI для планирования, фокуса и личных заметок.",
+      "category": "life",
+      "topic": "productivity",
+      "url": "/library/life/ai-life-focus",
+      "position": 2,
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:02.000Z",
+      "updated_at": "2026-01-01T00:00:02.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8002-000000000101",
+      "slug": "ai-business-start",
+      "title": "AI в бизнес-процессах",
+      "short_description": "Карта первых процессов, где AI может дать измеримый эффект.",
+      "category": "business",
+      "topic": "automation",
+      "url": "/library/business/ai-business-start",
+      "position": 1,
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:01.000Z",
+      "updated_at": "2026-01-01T00:00:01.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8002-000000000102",
+      "slug": "business-routine-automation",
+      "title": "Автоматизация бизнес-рутины",
+      "short_description": "Как находить повторяющиеся задачи и готовить их к автоматизации.",
+      "category": "business",
+      "topic": "automation",
+      "url": "/library/business/business-routine-automation",
+      "position": 2,
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:02.000Z",
+      "updated_at": "2026-01-01T00:00:02.000Z"
+    }
+  ],
+  "libraryProgress": [],
+  "userEvents": []
 }
