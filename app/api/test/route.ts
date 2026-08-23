@@ -7,7 +7,7 @@ import {
   getActiveExpertProfile,
   getLeadByTelegramUserId,
   getRecentMessagesByLeadId,
-} from "@/lib/data-store";
+} from "@/lib/storage";
 
 export async function GET(request: Request) {
   const telegramUserIdParam = new URL(request.url).searchParams.get("telegramUserId");

@@ -18,7 +18,7 @@ import {
   type ExpertProfileRow,
   type LeadRow,
   type MessageRow,
-} from "@/lib/data-store";
+} from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";

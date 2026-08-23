@@ -5,7 +5,7 @@ import {
   getRecentLeadDialogues,
   getRuntimeSettings,
   updateRuntimeSettings,
-} from "@/lib/data-store";
+} from "@/lib/storage";
 import { sendDocument, sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 
 const ADMIN_PREFIX = "admin:";

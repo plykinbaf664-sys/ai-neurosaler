@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getLocalStoreSummary } from "@/lib/data-store";
+import { getLocalStoreSummary } from "@/lib/storage";
 
 function StatusBadge({ ready, children }: { ready: boolean; children: React.ReactNode }) {
   return (
@@ -44,8 +44,8 @@ export default async function Home() {
               Нейропродавец работает автономно
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-400">
-              Локальное хранилище подключено. Квиз, история диалогов, материалы, статусы лидов и
-              follow-up больше не зависят от внешней базы данных.
+              Единый слой хранения подключён. Квиз, история диалогов, материалы, статусы лидов и
+              follow-up работают с выбранным storage-драйвером.
             </p>
           </div>
           <StatusBadge ready={systemReady}>{systemReady ? "Система готова" : "Нужна настройка"}</StatusBadge>
@@ -54,9 +54,11 @@ export default async function Home() {
         <section className="grid gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-violet-400/20 bg-violet-400/[0.07] p-6">
             <p className="text-sm text-violet-200">Хранилище</p>
-            <p className="mt-3 text-2xl font-semibold">{store.mode === "file" ? "Локальный JSON" : "Память"}</p>
+            <p className="mt-3 text-2xl font-semibold">
+              {store.mode === "supabase" ? "Supabase" : store.mode === "file" ? "Локальный JSON" : "Память"}
+            </p>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              {store.mode === "file" ? "Данные сохраняются между перезапусками." : "Данные живут до перезапуска процесса."}
+              {store.mode === "memory" ? "Данные живут до перезапуска процесса." : "Данные сохраняются между перезапусками."}
             </p>
           </article>
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
@@ -110,8 +112,8 @@ export default async function Home() {
         </section>
 
         <footer className="flex flex-col gap-2 pb-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <span>Профиль и знания: data/local-db.seed.json</span>
-          <span>Рабочие данные: .data/neurosaler.json</span>
+          <span>Storage driver: {store.driver}</span>
+          <span>{store.file ? `Рабочие данные: ${store.file}` : "Удалённая база: Supabase"}</span>
         </footer>
       </div>
     </main>

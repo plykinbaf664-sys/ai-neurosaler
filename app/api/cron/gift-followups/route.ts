@@ -1,4 +1,4 @@
-import { getDueGiftFollowupLeads, getRuntimeSettings, insertMessage, updateLeadById } from "@/lib/data-store";
+import { getDueGiftFollowupLeads, getRuntimeSettings, insertMessage, updateLeadById } from "@/lib/storage";
 import { sendTextMessage } from "@/lib/telegram";
 
 const GIFT_FOLLOWUP_TEXT = "Получилось посмотреть видео?";

@@ -5,7 +5,7 @@ import type {
   ExpertProfileRow,
   LeadRow,
   MessageRow,
-} from "@/lib/data-store";
+} from "@/lib/storage";
 
 type BuildNeiroPromptParams = {
   expert: ExpertProfileRow;

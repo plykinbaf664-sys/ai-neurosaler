@@ -1,16 +1,16 @@
 # AI Neurosaler / NeuroSeller
 
-Telegram-first AI sales assistant on Next.js 16. The application runs without Supabase: expert knowledge, leads, message history, materials and follow-up state are stored by the local data layer in `lib/data-store.ts`.
+Telegram-first AI sales assistant on Next.js 16. Business logic uses one storage interface with interchangeable local and Supabase adapters.
 
 ## Implemented changes
 
-- removed all runtime imports, requests and environment requirements related to Supabase;
-- replaced PostgREST with a typed local JSON store and serialized writes;
+- added `lib/storage` with local and Supabase adapters selected through `STORAGE_DRIVER`;
+- kept the existing local JSON store and restored lightweight Supabase/PostgREST persistence;
 - added a committed demonstration knowledge seed and mutable ignored runtime data;
 - preserved Telegram quiz, qualification, gift tracking, follow-ups, AI replies and material analysis;
 - added a runtime dashboard and `/api/status` health endpoint;
 - added an owner-only Telegram admin panel with statistics, dialogues, CSV lead export and safe runtime settings;
-- retained `supabase/sql` only as historical schema documentation.
+- retained the additive Supabase schema migrations under `supabase/sql`.
 
 ## Current architecture
 
@@ -18,15 +18,15 @@ Telegram-first AI sales assistant on Next.js 16. The application runs without Su
 Telegram
   -> POST /api/telegram/webhook
   -> quiz / qualification / material analysis / AI reply
-  -> lib/data-store.ts
-  -> .data/neurosaler.json
+  -> lib/storage/index.ts
+  -> local JSON or Supabase Postgres
 ```
 
 Runtime routes:
 
 ```text
 GET  /                         runtime dashboard
-GET  /api/status               readiness and local counters
+GET  /api/status               readiness and storage counters
 POST /api/telegram/webhook     Telegram updates
 GET  /api/gift/[leadId]        tracked gift redirect
 GET  /api/cron/gift-followups  scheduled gift follow-ups
@@ -50,6 +50,25 @@ LOCAL_DATA_MODE=file
 - when `LOCAL_DATA_MODE` is omitted on Vercel, `memory` is selected automatically because the deployment filesystem is not persistent.
 
 For a reliable live Telegram demonstration, run the app as a normal Node.js process with `LOCAL_DATA_MODE=file` and expose it through an HTTPS tunnel or a server with a persistent disk. Vercel memory mode is suitable only for a short UI/API smoke demo: serverless instances can restart or serve separate copies of state.
+
+## Switching storage
+
+Local is the default:
+
+```env
+STORAGE_DRIVER=local
+LOCAL_DATA_MODE=file
+```
+
+For Supabase, apply the existing additive SQL files from `supabase/sql` in filename order and set server-only credentials:
+
+```env
+STORAGE_DRIVER=supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+The Supabase adapter uses explicit column lists, keeps only bounded message history and truncated extracted material text, and never uses Supabase Storage for PDFs or media.
 
 ## Environment
 
@@ -119,8 +138,8 @@ npm run build
 5. Send a text, URL or PDF material and verify the analysis and audit handoff.
 6. Refresh `/` and confirm that the lead/message/material counters increased.
 
-## Legacy database files
+## Supabase schema
 
-The SQL files under `supabase/sql` are retained only as the historical schema and a migration reference. They are not imported or executed by the application. The runtime has no Supabase URL/key requirement and makes no Supabase network requests.
+The migrations under `supabase/sql` are additive and provide the tables expected by the Supabase adapter. The service-role key is read only by the server-side storage layer.
 
 See `docs/storage-audit.md` for the dependency audit, entity mapping and operational limitations.

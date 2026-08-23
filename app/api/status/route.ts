@@ -1,4 +1,4 @@
-import { getLocalStoreSummary } from "@/lib/data-store";
+import { getLocalStoreSummary } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -9,6 +9,7 @@ export async function GET() {
     return Response.json({
       ok: true,
       storage: {
+        driver: store.driver,
         mode: store.mode,
         expertLoaded: Boolean(store.expert),
         giftUrlConfigured: store.giftReady,
@@ -27,7 +28,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown local store error.";
+    const message = error instanceof Error ? error.message : "Unknown storage error.";
     return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

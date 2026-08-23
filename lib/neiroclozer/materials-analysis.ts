@@ -1,4 +1,8 @@
-import type { LeadRow } from "@/lib/data-store";
+import type { LeadRow } from "@/lib/storage";
+import {
+  MAX_MATERIALS_PER_LEAD as STORAGE_MAX_MATERIALS_PER_LEAD,
+  MAX_MATERIAL_TEXT_CHARS as STORAGE_MAX_MATERIAL_TEXT_CHARS,
+} from "@/lib/storage/limits";
 import {
   DEFAULT_MATERIAL_ANALYSIS_TOKENS,
   generateAnthropicText,
@@ -65,9 +69,9 @@ export const AFTER_HANDOFF_TEXT =
 export const DEEP_FOLLOWUP_TEXT =
   POST_QUIZ_FOLLOWUP_LIMIT_TEXT;
 
-export const MAX_MATERIALS_PER_LEAD = 2;
+export const MAX_MATERIALS_PER_LEAD = STORAGE_MAX_MATERIALS_PER_LEAD;
 export const MAX_PDF_BYTES = 8 * 1024 * 1024;
-const MAX_MATERIAL_TEXT_CHARS = 12000;
+const MAX_MATERIAL_TEXT_CHARS = STORAGE_MAX_MATERIAL_TEXT_CHARS;
 const MIN_EXTRACTED_TEXT_CHARS = 80;
 
 export type LeadMaterialType = "pdf" | "url" | "text" | "unknown";

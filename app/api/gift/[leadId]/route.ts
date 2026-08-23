@@ -1,4 +1,4 @@
-import { getLeadById, updateLeadById } from "@/lib/data-store";
+import { getLeadById, updateLeadById } from "@/lib/storage";
 
 function isSafeRedirect(value: string) {
   try {

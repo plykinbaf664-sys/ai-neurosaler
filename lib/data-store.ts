@@ -494,6 +494,21 @@ export async function insertMessage(input: MessageInsertInput) {
   });
 }
 
+export async function pruneMessagesByLeadId(leadId: string, keep: number) {
+  return mutateDatabase((database) => {
+    const keptIds = new Set(
+      database.messages
+        .filter((message) => message.lead_id === leadId)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, keep)
+        .map((message) => message.id),
+    );
+    database.messages = database.messages.filter(
+      (message) => message.lead_id !== leadId || keptIds.has(message.id),
+    );
+  });
+}
+
 export async function getLocalStoreSummary() {
   return readDatabase((database) => ({
     mode: getStoreMode(),
