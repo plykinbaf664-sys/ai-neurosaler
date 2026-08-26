@@ -10,7 +10,7 @@ import {
 } from "@/lib/storage";
 import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibraryEnabled } from "@/lib/library/config";
 import { getMaterialById } from "@/lib/library/materials";
-import { getCategoryProgress, markMaterialCompleted } from "@/lib/library/progress";
+import { getCategoryProgress, markMaterialCompleted, markMaterialOpened } from "@/lib/library/progress";
 import { getNextMaterialAfter, getNextRecommendedMaterial } from "@/lib/library/recommendations";
 import { unlockCategoryReward } from "@/lib/library/rewards";
 import { createLibraryToken } from "@/lib/security/library-token";
@@ -187,15 +187,26 @@ async function showMaterial(
   material: LibraryMaterialRow,
   publicBaseUrl: string,
 ) {
+  const configuredUrl = new URL(material.url, publicBaseUrl);
+  const publicOrigin = new URL(publicBaseUrl).origin;
+  const isExternalHttps = configuredUrl.protocol === "https:" && configuredUrl.origin !== publicOrigin;
+
+  let openUrl = configuredUrl;
+
+  if (isExternalHttps) {
+    await markMaterialOpened(lead.id, material);
+  } else {
+    const token = createLibraryToken({
+      userId: lead.id,
+      materialId: material.id,
+      category: material.category,
+      slug: material.slug,
+    });
+    openUrl = new URL("/api/library/open", publicBaseUrl);
+    openUrl.searchParams.set("token", token);
+  }
+
   const progress = await getCategoryProgress(lead.id, material.category);
-  const token = createLibraryToken({
-    userId: lead.id,
-    materialId: material.id,
-    category: material.category,
-    slug: material.slug,
-  });
-  const openUrl = new URL("/api/library/open", publicBaseUrl);
-  openUrl.searchParams.set("token", token);
 
   await sendAndStore(
     message.telegramChatId,
