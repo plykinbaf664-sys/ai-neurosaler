@@ -108,6 +108,19 @@
   "leadMaterials": [],
   "libraryMaterials": [
     {
+      "id": "00000000-0000-4000-8001-000000000100",
+      "slug": "vygruzi-golovu-za-7-min",
+      "title": "Выгрузи голову за 7 минут",
+      "short_description": "Быстрая практика, чтобы выгрузить мысли из головы и вернуть ясность.",
+      "category": "life",
+      "topic": "productivity / mental unload",
+      "url": "https://telegra.ph/Vygruzi-golovu-za-7-min-08-25",
+      "position": 1,
+      "is_active": true,
+      "created_at": "2026-08-25T00:00:00.000Z",
+      "updated_at": "2026-08-25T00:00:00.000Z"
+    },
+    {
       "id": "00000000-0000-4000-8001-000000000101",
       "slug": "ai-life-start",
       "title": "AI для повседневных задач",
@@ -115,8 +128,8 @@
       "category": "life",
       "topic": "productivity",
       "url": "/library/life/ai-life-start",
-      "position": 1,
-      "is_active": true,
+      "position": 2,
+      "is_active": false,
       "created_at": "2026-01-01T00:00:01.000Z",
       "updated_at": "2026-01-01T00:00:01.000Z"
     },
@@ -128,8 +141,8 @@
       "category": "life",
       "topic": "productivity",
       "url": "/library/life/ai-life-focus",
-      "position": 2,
-      "is_active": true,
+      "position": 3,
+      "is_active": false,
       "created_at": "2026-01-01T00:00:02.000Z",
       "updated_at": "2026-01-01T00:00:02.000Z"
     },

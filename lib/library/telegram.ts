@@ -10,8 +10,9 @@ import {
 } from "@/lib/storage";
 import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibraryEnabled } from "@/lib/library/config";
 import { getMaterialById } from "@/lib/library/materials";
-import { getCategoryProgress } from "@/lib/library/progress";
-import { getNextRecommendedMaterial } from "@/lib/library/recommendations";
+import { getCategoryProgress, markMaterialCompleted } from "@/lib/library/progress";
+import { getNextMaterialAfter, getNextRecommendedMaterial } from "@/lib/library/recommendations";
+import { unlockCategoryReward } from "@/lib/library/rewards";
 import { createLibraryToken } from "@/lib/security/library-token";
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
@@ -22,6 +23,8 @@ const CATEGORY_PREFIX = "lib:cat:";
 const CONTINUE_PREFIX = "lib:continue:";
 const ALL_PREFIX = "lib:all:";
 const MATERIAL_PREFIX = "lib:mat:";
+const COMPLETE_PREFIX = "lib:done:";
+const NEXT_PREFIX = "lib:next:";
 const MATERIALS_PER_MESSAGE = 8;
 
 type LibraryTelegramResult = {
@@ -198,12 +201,13 @@ async function showMaterial(
     message.telegramChatId,
     lead,
     expertProfileId,
-    `**${material.title}**\n\n${material.short_description}\n\nИзучено ${progress.completed} из ${progress.total}`,
+    `**${material.title}**\n\n${material.short_description}\n\nОткрой материал, затем вернись сюда и отметь его прочитанным.\n\nИзучено ${progress.completed} из ${progress.total}`,
     {
       inline_keyboard: [
         [{ text: "Открыть материал", url: openUrl.toString() }],
-        [{ text: "Все материалы", callback_data: `${ALL_PREFIX}${material.category}` }],
-        [{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }],
+        [{ text: "✅ Я прочитал", callback_data: `${COMPLETE_PREFIX}${material.id}` }],
+        [{ text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` }],
+        [{ text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${material.category}` }],
       ],
     },
   );
@@ -225,7 +229,9 @@ export async function handleLibraryTelegramAction(input: {
     message.text.startsWith(CATEGORY_PREFIX) ||
     message.text.startsWith(CONTINUE_PREFIX) ||
     message.text.startsWith(ALL_PREFIX) ||
-    message.text.startsWith(MATERIAL_PREFIX);
+    message.text.startsWith(MATERIAL_PREFIX) ||
+    message.text.startsWith(COMPLETE_PREFIX) ||
+    message.text.startsWith(NEXT_PREFIX);
 
   if (!isStart && !isLibraryAction) return { handled: false, startMarketing: false };
 
@@ -288,6 +294,71 @@ export async function handleLibraryTelegramAction(input: {
   if (message.text.startsWith(ALL_PREFIX)) {
     const category = message.text.slice(ALL_PREFIX.length);
     if (getLibraryCategory(category)) await showAllMaterials(message, lead, expertProfile.id, category);
+    return { handled: true, startMarketing: false, lead };
+  }
+
+  if (message.text.startsWith(COMPLETE_PREFIX)) {
+    const material = await getMaterialById(message.text.slice(COMPLETE_PREFIX.length));
+
+    if (material?.is_active) {
+      const progress = await markMaterialCompleted(lead.id, material);
+      const rewardUnlocked = await unlockCategoryReward(lead.id, progress);
+      const nextMaterial = await getNextMaterialAfter(lead.id, material);
+      const buttons = [];
+      if (nextMaterial) {
+        buttons.push([
+          { text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` },
+        ]);
+      }
+      buttons.push([
+        { text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${material.category}` },
+      ]);
+      await sendAndStore(
+        message.telegramChatId,
+        lead,
+        expertProfile.id,
+        [
+          "Готово — материал отмечен как изученный.",
+          `Изучено ${progress.completed} из ${progress.total}.`,
+          rewardUnlocked ? "Дополнительный бонус открыт." : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        { inline_keyboard: buttons },
+      );
+    }
+    return { handled: true, startMarketing: false, lead };
+  }
+
+  if (message.text.startsWith(NEXT_PREFIX)) {
+    const currentMaterial = await getMaterialById(message.text.slice(NEXT_PREFIX.length));
+
+    if (currentMaterial?.is_active) {
+      const nextMaterial = await getNextMaterialAfter(lead.id, currentMaterial);
+
+      if (nextMaterial) {
+        await trackUserEvent({
+          userId: lead.id,
+          eventName: "next_material_clicked",
+          materialId: nextMaterial.id,
+          category: nextMaterial.category,
+          metadata: { from_material_id: currentMaterial.id },
+        });
+        await showMaterial(message, lead, expertProfile.id, nextMaterial, publicBaseUrl);
+      } else {
+        await sendAndStore(
+          message.telegramChatId,
+          lead,
+          expertProfile.id,
+          "Дальше активных материалов пока нет.",
+          {
+            inline_keyboard: [
+              [{ text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${currentMaterial.category}` }],
+            ],
+          },
+        );
+      }
+    }
     return { handled: true, startMarketing: false, lead };
   }
 

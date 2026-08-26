@@ -234,7 +234,42 @@ function cloneSeedDatabase() {
 
 function ensureLibraryCollections(database: LocalDatabase) {
   const seed = cloneSeedDatabase();
-  database.libraryMaterials ??= seed.libraryMaterials ?? [];
+  const seededMaterials = seed.libraryMaterials ?? [];
+
+  if (!Array.isArray(database.libraryMaterials) || database.libraryMaterials.length === 0) {
+    database.libraryMaterials = seededMaterials;
+  } else {
+    const firstLifeMaterial = seededMaterials.find(
+      (material) => material.category === "life" && material.slug === "vygruzi-golovu-za-7-min",
+    );
+
+    if (
+      firstLifeMaterial &&
+      !database.libraryMaterials.some(
+        (material) =>
+          material.category === firstLifeMaterial.category && material.slug === firstLifeMaterial.slug,
+      )
+    ) {
+      for (const material of database.libraryMaterials) {
+        if (
+          material.category === firstLifeMaterial.category &&
+          material.position >= firstLifeMaterial.position
+        ) {
+          material.position += 1;
+        }
+      }
+      database.libraryMaterials.push(firstLifeMaterial);
+    }
+
+    for (const material of database.libraryMaterials) {
+      if (
+        material.category === "life" &&
+        (material.slug === "ai-life-start" || material.slug === "ai-life-focus")
+      ) {
+        material.is_active = false;
+      }
+    }
+  }
   database.libraryProgress ??= [];
   database.userEvents ??= [];
   return database;

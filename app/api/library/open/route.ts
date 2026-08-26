@@ -23,11 +23,16 @@ export async function GET(request: Request) {
   await markMaterialOpened(payload.userId, material);
   const canonicalPath = `/library/${encodeURIComponent(material.category)}/${encodeURIComponent(material.slug)}`;
   const configuredDestination = new URL(material.url, request.url);
+  const requestOrigin = new URL(request.url).origin;
+  const isExternalHttps =
+    configuredDestination.origin !== requestOrigin && configuredDestination.protocol === "https:";
+  const isInternalLibraryPage =
+    configuredDestination.origin === requestOrigin && configuredDestination.pathname.startsWith("/library/");
   const destination =
-    configuredDestination.origin === new URL(request.url).origin &&
-    configuredDestination.pathname.startsWith("/library/")
+    isExternalHttps || isInternalLibraryPage
       ? configuredDestination
       : new URL(canonicalPath, request.url);
-  destination.searchParams.set("token", token);
+
+  if (!isExternalHttps) destination.searchParams.set("token", token);
   return Response.redirect(destination, 303);
 }
