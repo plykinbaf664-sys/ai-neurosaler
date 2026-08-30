@@ -10,9 +10,20 @@ import {
 } from "@/lib/storage";
 import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibraryEnabled } from "@/lib/library/config";
 import { getMaterialById } from "@/lib/library/materials";
-import { getCategoryProgress, markMaterialCompleted, markMaterialOpened } from "@/lib/library/progress";
-import { getNextMaterialAfter, getNextRecommendedMaterial } from "@/lib/library/recommendations";
+import { getCategoryProgress, markMaterialCompleted } from "@/lib/library/progress";
+import {
+  buildContextualLibraryReply,
+  getNextMaterialAfter,
+  getNextRecommendedMaterial,
+} from "@/lib/library/recommendations";
 import { unlockCategoryReward } from "@/lib/library/rewards";
+import { cancelLibraryFollowup, scheduleRequestedLibraryReminder } from "@/lib/library/followups";
+import {
+  getLibraryUserProfile,
+  refreshLibraryUserProfile,
+  rememberLibraryUserMessage,
+  setConversationRoute,
+} from "@/lib/library/user-profile";
 import { createLibraryToken } from "@/lib/security/library-token";
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
@@ -187,26 +198,31 @@ async function showMaterial(
   material: LibraryMaterialRow,
   publicBaseUrl: string,
 ) {
-  const configuredUrl = new URL(material.url, publicBaseUrl);
-  const publicOrigin = new URL(publicBaseUrl).origin;
-  const isExternalHttps = configuredUrl.protocol === "https:" && configuredUrl.origin !== publicOrigin;
-
-  let openUrl = configuredUrl;
-
-  if (isExternalHttps) {
-    await markMaterialOpened(lead.id, material);
-  } else {
-    const token = createLibraryToken({
-      userId: lead.id,
-      materialId: material.id,
-      category: material.category,
-      slug: material.slug,
-    });
-    openUrl = new URL("/api/library/open", publicBaseUrl);
-    openUrl.searchParams.set("token", token);
-  }
+  const token = createLibraryToken({
+    userId: lead.id,
+    materialId: material.id,
+    category: material.category,
+    slug: material.slug,
+  });
+  const openUrl = new URL("/api/library/open", publicBaseUrl);
+  openUrl.searchParams.set("token", token);
 
   const progress = await getCategoryProgress(lead.id, material.category);
+  await trackUserEvent({
+    userId: lead.id,
+    eventName: "material_presented",
+    materialId: material.id,
+    category: material.category,
+    metadata: {
+      route: material.category,
+      slug: material.slug,
+      title: material.title,
+      topic: material.topic,
+      status: progress.statuses.get(material.id) ?? null,
+    },
+  });
+  await refreshLibraryUserProfile(lead.id);
+  if (progress.statuses.get(material.id) !== "opened") await cancelLibraryFollowup(lead.id);
 
   await sendAndStore(
     message.telegramChatId,
@@ -249,6 +265,7 @@ export async function handleLibraryTelegramAction(input: {
   const lead = await ensureLibraryLead(message, expertProfile, input.existingLead);
 
   if (message.text === MARKETING_ACTION) {
+    await setConversationRoute(lead.id, "marketing");
     return { handled: false, startMarketing: true, lead };
   }
 
@@ -269,7 +286,13 @@ export async function handleLibraryTelegramAction(input: {
     if (!getLibraryCategory(category)) return { handled: true, startMarketing: false, lead };
     const progress = await getCategoryProgress(lead.id, category);
     await trackUserEvent({ userId: lead.id, eventName: "library_opened", category });
-    await trackUserEvent({ userId: lead.id, eventName: "category_selected", category });
+    await trackUserEvent({
+      userId: lead.id,
+      eventName: "category_selected",
+      category,
+      metadata: { route: category },
+    });
+    await refreshLibraryUserProfile(lead.id);
 
     if (progress.completed > 0 || progress.opened > 0) {
       await sendAndStore(
@@ -380,4 +403,55 @@ export async function handleLibraryTelegramAction(input: {
   }
 
   return { handled: false, startMarketing: false, lead };
+}
+
+export async function handleLibraryContextMessage(input: {
+  message: TelegramPrivateTextMessage;
+  expertProfile: ExpertProfileRow;
+  existingLead: LeadRow | null;
+  marketingFlowActive: boolean;
+}) {
+  if (!isLibraryEnabled() || !input.existingLead || input.message.callbackQueryId) return false;
+
+  const profile = await getLibraryUserProfile(input.existingLead.id);
+  if (input.marketingFlowActive && profile?.last_route !== "life" && profile?.last_route !== "business") {
+    return false;
+  }
+
+  const reply = await buildContextualLibraryReply(input.existingLead.id, input.message.text);
+  if (!reply) return false;
+
+  const lead =
+    (await updateLeadById(input.existingLead.id, {
+      telegramChatId: input.message.telegramChatId,
+      telegramUsername: input.message.telegramUsername,
+      firstName: input.message.firstName,
+      lastName: input.message.lastName,
+      lastUserMessage: input.message.text,
+    })) ?? input.existingLead;
+
+  await storeIncoming(input.message, lead, input.expertProfile.id);
+  await rememberLibraryUserMessage(lead.id, reply.route, input.message.text);
+  const reminderScheduled = reply.reminderRequested
+    ? await scheduleRequestedLibraryReminder(lead.id)
+    : false;
+  const responseText =
+    reply.reminderRequested && !reminderScheduled
+      ? "Сейчас автоматические напоминания выключены. Материал останется в твоём прогрессе — к нему можно вернуться через библиотеку в любой момент."
+      : reply.text;
+
+  const buttons = [];
+  if (reply.suggestedMaterial) {
+    buttons.push([
+      {
+        text: `Открыть: ${reply.suggestedMaterial.title}`.slice(0, 60),
+        callback_data: `${MATERIAL_PREFIX}${reply.suggestedMaterial.id}`,
+      },
+    ]);
+  }
+  buttons.push([{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]);
+  await sendAndStore(input.message.telegramChatId, lead, input.expertProfile.id, responseText, {
+    inline_keyboard: buttons,
+  });
+  return true;
 }

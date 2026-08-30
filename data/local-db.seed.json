@@ -111,14 +111,27 @@
       "id": "00000000-0000-4000-8001-000000000100",
       "slug": "vygruzi-golovu-za-7-min",
       "title": "Выгрузи голову за 7 минут",
-      "short_description": "Быстрая практика, чтобы выгрузить мысли из головы и вернуть ясность.",
+      "short_description": "Быстрая практика, чтобы выгрузить мысли из головы, снизить внутренний шум и вернуть ясность за несколько минут.",
       "category": "life",
-      "topic": "productivity / mental unload",
+      "topic": "productivity / ai-practice",
       "url": "https://telegra.ph/Vygruzi-golovu-za-7-min-08-25",
       "position": 1,
       "is_active": true,
       "created_at": "2026-08-25T00:00:00.000Z",
       "updated_at": "2026-08-25T00:00:00.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8001-000000000103",
+      "slug": "300-otzyvov-za-5-minut",
+      "title": "300 отзывов за 5 минут",
+      "short_description": "Показывает, как быстро собрать массив отзывов и вытащить из них повторяющиеся боли, желания и идеи для решений с помощью AI.",
+      "category": "life",
+      "topic": "productivity / ai-practice / research",
+      "url": "https://telegra.ph/300-otzyvov-za-5-minut-08-28",
+      "position": 2,
+      "is_active": true,
+      "created_at": "2026-08-28T00:00:00.000Z",
+      "updated_at": "2026-08-28T00:00:00.000Z"
     },
     {
       "id": "00000000-0000-4000-8001-000000000101",
@@ -155,7 +168,7 @@
       "topic": "automation",
       "url": "/library/business/ai-business-start",
       "position": 1,
-      "is_active": true,
+      "is_active": false,
       "created_at": "2026-01-01T00:00:01.000Z",
       "updated_at": "2026-01-01T00:00:01.000Z"
     },
@@ -168,11 +181,25 @@
       "topic": "automation",
       "url": "/library/business/business-routine-automation",
       "position": 2,
-      "is_active": true,
+      "is_active": false,
       "created_at": "2026-01-01T00:00:02.000Z",
       "updated_at": "2026-01-01T00:00:02.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8002-000000000100",
+      "slug": "chto-komanda-poobeshchala-i-zabyla",
+      "title": "Что команда пообещала и забыла",
+      "short_description": "Материал про то, как теряются договорённости в команде, почему задачи забываются и как AI может помочь держать фокус, ответственность и контроль без ручного микроменеджмента.",
+      "category": "business",
+      "topic": "team / management / operations",
+      "url": "https://telegra.ph/CHto-komanda-poobeshchala-i-zabyla-08-28",
+      "position": 1,
+      "is_active": true,
+      "created_at": "2026-08-28T00:00:00.000Z",
+      "updated_at": "2026-08-28T00:00:00.000Z"
     }
   ],
   "libraryProgress": [],
-  "userEvents": []
+  "userEvents": [],
+  "userLibraryProfiles": []
 }

@@ -20,7 +20,7 @@ import {
   type MessageRow,
 } from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
-import { handleLibraryTelegramAction } from "@/lib/library/telegram";
+import { handleLibraryContextMessage, handleLibraryTelegramAction } from "@/lib/library/telegram";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
@@ -934,6 +934,19 @@ export async function POST(request: Request) {
     }
 
     existingLead = libraryAction.lead ?? existingLead;
+    const marketingFlowActive =
+      isMarketingRoiQuizStage(existingLead?.current_stage) || isPostQuizStage(existingLead?.current_stage);
+    if (
+      await handleLibraryContextMessage({
+        message: incomingMessage,
+        expertProfile,
+        existingLead,
+        marketingFlowActive,
+      })
+    ) {
+      return Response.json({ ok: true, libraryContext: true });
+    }
+
     const isNewLead = !existingLead;
     const entryFlowMode = libraryAction.startMarketing ? "quiz" : (await getRuntimeSettings()).entryFlowMode;
     const shouldRestartQuiz = Boolean(

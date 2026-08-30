@@ -86,7 +86,14 @@ type MessageRow = {
   channel: "telegram";
   telegram_message_id: number | null;
   text: string;
-  message_type: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
+  message_type:
+    | "user"
+    | "welcome"
+    | "gift"
+    | "qual_question"
+    | "gift_followup"
+    | "library_followup"
+    | "ai_reply";
   created_at: string;
 };
 
@@ -139,7 +146,14 @@ type MessageInsertInput = {
   channel: "telegram";
   telegramMessageId: number | null;
   text: string;
-  messageType: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
+  messageType:
+    | "user"
+    | "welcome"
+    | "gift"
+    | "qual_question"
+    | "gift_followup"
+    | "library_followup"
+    | "ai_reply";
 };
 
 type RuntimeSettings = {
@@ -172,15 +186,51 @@ type LibraryProgressRow = {
   updated_at: string;
 };
 
+type UserEventName =
+  | "library_opened"
+  | "category_selected"
+  | "material_opened"
+  | "material_presented"
+  | "material_completed"
+  | "next_material_clicked"
+  | "library_returned"
+  | "library_dialogue_message"
+  | "library_followup_sent"
+  | "reward_unlocked";
+
 type UserEventRow = {
   id: string;
   user_id: string;
-  event_name: string;
+  event_name: UserEventName;
   material_id: string | null;
   category: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
+type ConversationRoute = "marketing" | "life" | "business";
+
+type UserLibraryProfileRow = {
+  user_id: string;
+  selected_categories: string[];
+  opened_topics: string[];
+  completed_topics: string[];
+  last_route: ConversationRoute | null;
+  last_category: "life" | "business" | null;
+  last_material_slug: string | null;
+  last_material_title: string | null;
+  last_material_status: "opened" | "completed" | null;
+  completed_count: number;
+  engagement_score: number;
+  last_followup_type: string | null;
+  last_user_intent: string | null;
+  last_interaction_at: string;
+  last_followup_sent_at: string | null;
+  next_followup_due_at: string | null;
+  updated_at: string;
+};
+
+type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
 
 type LocalDatabase = {
   version: number;
@@ -195,6 +245,7 @@ type LocalDatabase = {
   libraryMaterials: LibraryMaterialRow[];
   libraryProgress: LibraryProgressRow[];
   userEvents: UserEventRow[];
+  userLibraryProfiles: UserLibraryProfileRow[];
 };
 
 type LocalStoreRuntime = {
@@ -239,32 +290,22 @@ function ensureLibraryCollections(database: LocalDatabase) {
   if (!Array.isArray(database.libraryMaterials) || database.libraryMaterials.length === 0) {
     database.libraryMaterials = seededMaterials;
   } else {
-    const firstLifeMaterial = seededMaterials.find(
-      (material) => material.category === "life" && material.slug === "vygruzi-golovu-za-7-min",
-    );
-
-    if (
-      firstLifeMaterial &&
-      !database.libraryMaterials.some(
+    for (const seededMaterial of seededMaterials) {
+      const existing = database.libraryMaterials.find(
         (material) =>
-          material.category === firstLifeMaterial.category && material.slug === firstLifeMaterial.slug,
-      )
-    ) {
-      for (const material of database.libraryMaterials) {
-        if (
-          material.category === firstLifeMaterial.category &&
-          material.position >= firstLifeMaterial.position
-        ) {
-          material.position += 1;
-        }
-      }
-      database.libraryMaterials.push(firstLifeMaterial);
+          material.category === seededMaterial.category && material.slug === seededMaterial.slug,
+      );
+
+      if (existing) Object.assign(existing, seededMaterial);
+      else database.libraryMaterials.push(seededMaterial);
     }
 
     for (const material of database.libraryMaterials) {
       if (
-        material.category === "life" &&
-        (material.slug === "ai-life-start" || material.slug === "ai-life-focus")
+        (material.category === "life" &&
+          (material.slug === "ai-life-start" || material.slug === "ai-life-focus")) ||
+        (material.category === "business" &&
+          (material.slug === "ai-business-start" || material.slug === "business-routine-automation"))
       ) {
         material.is_active = false;
       }
@@ -272,6 +313,7 @@ function ensureLibraryCollections(database: LocalDatabase) {
   }
   database.libraryProgress ??= [];
   database.userEvents ??= [];
+  database.userLibraryProfiles ??= [];
   return database;
 }
 
@@ -329,7 +371,7 @@ async function persistDatabase(database: LocalDatabase) {
 
 async function loadDatabase() {
   if (getStoreMode() === "memory") {
-    return applyEnvironmentOverrides(cloneSeedDatabase());
+    return applyEnvironmentOverrides(ensureLibraryCollections(cloneSeedDatabase()));
   }
 
   const dataFilePath = getDataFilePath();
@@ -750,7 +792,7 @@ export async function upsertLibraryProgress(
 
 export async function insertUserEvent(input: {
   userId: string;
-  eventName: string;
+  eventName: UserEventName;
   materialId?: string | null;
   category?: string | null;
   metadata?: Record<string, unknown>;
@@ -770,7 +812,7 @@ export async function insertUserEvent(input: {
   });
 }
 
-export async function hasUserEvent(userId: string, eventName: string, category?: string | null) {
+export async function hasUserEvent(userId: string, eventName: UserEventName, category?: string | null) {
   return readDatabase((database) =>
     database.userEvents.some(
       (event) =>
@@ -778,6 +820,66 @@ export async function hasUserEvent(userId: string, eventName: string, category?:
         event.event_name === eventName &&
         (category === undefined || event.category === category),
     ),
+  );
+}
+
+export async function getRecentUserEvents(userId: string, limit = 100) {
+  return readDatabase((database) =>
+    database.userEvents
+      .filter((event) => event.user_id === userId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit),
+  );
+}
+
+export async function getUserLibraryProfile(userId: string) {
+  return readDatabase(
+    (database) => database.userLibraryProfiles.find((profile) => profile.user_id === userId) ?? null,
+  );
+}
+
+export async function upsertUserLibraryProfile(userId: string, input: UserLibraryProfilePatch) {
+  return mutateDatabase((database) => {
+    const now = new Date().toISOString();
+    let profile = database.userLibraryProfiles.find((item) => item.user_id === userId);
+
+    if (!profile) {
+      profile = {
+        user_id: userId,
+        selected_categories: [],
+        opened_topics: [],
+        completed_topics: [],
+        last_route: null,
+        last_category: null,
+        last_material_slug: null,
+        last_material_title: null,
+        last_material_status: null,
+        completed_count: 0,
+        engagement_score: 0,
+        last_followup_type: null,
+        last_user_intent: null,
+        last_interaction_at: now,
+        last_followup_sent_at: null,
+        next_followup_due_at: null,
+        updated_at: now,
+      };
+      database.userLibraryProfiles.push(profile);
+    }
+
+    Object.assign(profile, input, { updated_at: now });
+    return profile;
+  });
+}
+
+export async function getDueLibraryFollowupProfiles(nowIso: string, limit = 20) {
+  return readDatabase((database) =>
+    database.userLibraryProfiles
+      .filter(
+        (profile) =>
+          Boolean(profile.next_followup_due_at) && profile.next_followup_due_at! <= nowIso,
+      )
+      .sort((a, b) => a.next_followup_due_at!.localeCompare(b.next_followup_due_at!))
+      .slice(0, limit),
   );
 }
 
@@ -793,4 +895,6 @@ export type {
   LibraryProgressStatus,
   MessageRow,
   RuntimeSettings,
+  UserEventRow,
+  UserLibraryProfileRow,
 };

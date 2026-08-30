@@ -23,7 +23,10 @@ import type {
   MessageRow,
   RuntimeSettings,
   StorageAdapter,
+  UserEventRow,
   UserEventInsertInput,
+  UserLibraryProfilePatch,
+  UserLibraryProfileRow,
 } from "@/lib/storage/types";
 
 const PROFILE_COLUMNS =
@@ -41,6 +44,9 @@ const MESSAGE_COLUMNS =
 const LIBRARY_MATERIAL_COLUMNS =
   "id,slug,title,short_description,category,topic,url,position,is_active,created_at,updated_at";
 const LIBRARY_PROGRESS_COLUMNS = "id,user_id,material_id,status,created_at,updated_at";
+const USER_EVENT_COLUMNS = "id,user_id,event_name,material_id,category,metadata,created_at";
+const USER_LIBRARY_PROFILE_COLUMNS =
+  "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at";
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -186,6 +192,28 @@ function materialPayload(input: LeadMaterialInsertInput) {
     analysis: truncateStoredText(input.analysis, MAX_MATERIAL_TEXT_CHARS),
     status: input.status ?? "received",
   };
+}
+
+function userLibraryProfilePayload(input: UserLibraryProfilePatch) {
+  return Object.fromEntries(
+    Object.entries({
+      selected_categories: input.selected_categories,
+      opened_topics: input.opened_topics,
+      completed_topics: input.completed_topics,
+      last_route: input.last_route,
+      last_category: input.last_category,
+      last_material_slug: input.last_material_slug,
+      last_material_title: input.last_material_title,
+      last_material_status: input.last_material_status,
+      completed_count: input.completed_count,
+      engagement_score: input.engagement_score,
+      last_followup_type: input.last_followup_type,
+      last_user_intent: input.last_user_intent,
+      last_interaction_at: input.last_interaction_at,
+      last_followup_sent_at: input.last_followup_sent_at,
+      next_followup_due_at: input.next_followup_due_at,
+    }).filter(([, value]) => value !== undefined),
+  );
 }
 
 function getDefaultRuntimeSettings(): RuntimeSettings {
@@ -538,5 +566,41 @@ export const supabaseStorageAdapter: StorageAdapter = {
         ...(category === undefined ? {} : { category: category === null ? "is.null" : `eq.${category}` }),
       })) > 0
     );
+  },
+  getRecentUserEvents(userId, limit = 100) {
+    return selectRows<UserEventRow>("user_events", {
+      select: USER_EVENT_COLUMNS,
+      user_id: `eq.${userId}`,
+      order: "created_at.desc",
+      limit: Math.min(limit, 200),
+    });
+  },
+  getUserLibraryProfile(userId) {
+    return selectOne<UserLibraryProfileRow>("user_library_profiles", {
+      select: USER_LIBRARY_PROFILE_COLUMNS,
+      user_id: `eq.${userId}`,
+    });
+  },
+  async upsertUserLibraryProfile(userId, input) {
+    const rows = (
+      await supabaseRequest<UserLibraryProfileRow[]>(
+        "user_library_profiles",
+        { on_conflict: "user_id", select: USER_LIBRARY_PROFILE_COLUMNS },
+        {
+          method: "POST",
+          body: { user_id: userId, ...userLibraryProfilePayload(input) },
+          prefer: "resolution=merge-duplicates,return=representation",
+        },
+      )
+    ).data;
+    return rows[0];
+  },
+  getDueLibraryFollowupProfiles(nowIso, limit = 20) {
+    return selectRows<UserLibraryProfileRow>("user_library_profiles", {
+      select: USER_LIBRARY_PROFILE_COLUMNS,
+      next_followup_due_at: `lte.${nowIso}`,
+      order: "next_followup_due_at.asc",
+      limit: Math.min(limit, 100),
+    });
   },
 };

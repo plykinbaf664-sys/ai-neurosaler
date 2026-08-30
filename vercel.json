@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/gift-followups",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/library-followups",
+      "schedule": "15 12 * * *"
     }
   ]
 }

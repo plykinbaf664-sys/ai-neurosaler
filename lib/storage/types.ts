@@ -80,7 +80,14 @@ export type MessageRow = {
   channel: "telegram";
   telegram_message_id: number | null;
   text: string;
-  message_type: "user" | "welcome" | "gift" | "qual_question" | "gift_followup" | "ai_reply";
+  message_type:
+    | "user"
+    | "welcome"
+    | "gift"
+    | "qual_question"
+    | "gift_followup"
+    | "library_followup"
+    | "ai_reply";
   created_at: string;
 };
 
@@ -202,10 +209,47 @@ export type UserEventName =
   | "library_opened"
   | "category_selected"
   | "material_opened"
+  | "material_presented"
   | "material_completed"
   | "next_material_clicked"
   | "library_returned"
+  | "library_dialogue_message"
+  | "library_followup_sent"
   | "reward_unlocked";
+
+export type UserEventRow = {
+  id: string;
+  user_id: string;
+  event_name: UserEventName;
+  material_id: string | null;
+  category: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConversationRoute = "marketing" | "life" | "business";
+
+export type UserLibraryProfileRow = {
+  user_id: string;
+  selected_categories: string[];
+  opened_topics: string[];
+  completed_topics: string[];
+  last_route: ConversationRoute | null;
+  last_category: "life" | "business" | null;
+  last_material_slug: string | null;
+  last_material_title: string | null;
+  last_material_status: "opened" | "completed" | null;
+  completed_count: number;
+  engagement_score: number;
+  last_followup_type: string | null;
+  last_user_intent: string | null;
+  last_interaction_at: string;
+  last_followup_sent_at: string | null;
+  next_followup_due_at: string | null;
+  updated_at: string;
+};
+
+export type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
 
 export type UserEventInsertInput = {
   userId: string;
@@ -251,4 +295,8 @@ export interface StorageAdapter {
   ): Promise<LibraryProgressRow>;
   insertUserEvent(input: UserEventInsertInput): Promise<StoredRowRef>;
   hasUserEvent(userId: string, eventName: UserEventName, category?: string | null): Promise<boolean>;
+  getRecentUserEvents(userId: string, limit?: number): Promise<UserEventRow[]>;
+  getUserLibraryProfile(userId: string): Promise<UserLibraryProfileRow | null>;
+  upsertUserLibraryProfile(userId: string, input: UserLibraryProfilePatch): Promise<UserLibraryProfileRow>;
+  getDueLibraryFollowupProfiles(nowIso: string, limit?: number): Promise<UserLibraryProfileRow[]>;
 }

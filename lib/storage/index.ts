@@ -143,9 +143,29 @@ export function hasUserEvent(
   return getStorageAdapter().hasUserEvent(userId, eventName, category);
 }
 
+export function getRecentUserEvents(userId: string, limit?: number) {
+  return getStorageAdapter().getRecentUserEvents(userId, limit);
+}
+
+export function getUserLibraryProfile(userId: string) {
+  return getStorageAdapter().getUserLibraryProfile(userId);
+}
+
+export function upsertUserLibraryProfile(
+  userId: string,
+  input: import("@/lib/storage/types").UserLibraryProfilePatch,
+) {
+  return getStorageAdapter().upsertUserLibraryProfile(userId, input);
+}
+
+export function getDueLibraryFollowupProfiles(nowIso: string, limit?: number) {
+  return getStorageAdapter().getDueLibraryFollowupProfiles(nowIso, limit);
+}
+
 export type {
   AdminLeadRow,
   AdminOverview,
+  ConversationRoute,
   ExpertFaqRow,
   ExpertObjectionRow,
   ExpertOfferRow,
@@ -166,4 +186,7 @@ export type {
   StoredRowRef,
   UserEventInsertInput,
   UserEventName,
+  UserEventRow,
+  UserLibraryProfilePatch,
+  UserLibraryProfileRow,
 } from "@/lib/storage/types";

@@ -1,7 +1,9 @@
 import "server-only";
 
 import { getLibraryProgress, upsertLibraryProgress, type LibraryMaterialRow } from "@/lib/storage";
+import { cancelLibraryFollowup, scheduleLibraryFollowup } from "@/lib/library/followups";
 import { getCategoryMaterials } from "@/lib/library/materials";
+import { refreshLibraryUserProfile } from "@/lib/library/user-profile";
 import { trackUserEvent } from "@/lib/tracking/events";
 
 export type CategoryProgress = {
@@ -42,8 +44,17 @@ export async function markMaterialOpened(userId: string, material: LibraryMateri
     eventName: "material_opened",
     materialId: material.id,
     category: material.category,
-    metadata: { topic: material.topic, first_open: !current },
+    metadata: {
+      topic: material.topic,
+      slug: material.slug,
+      title: material.title,
+      route: material.category,
+      status: current?.status === "completed" ? "completed" : "opened",
+      first_open: !current,
+    },
   });
+  await refreshLibraryUserProfile(userId);
+  if (current?.status !== "completed") await scheduleLibraryFollowup(userId, material);
 }
 
 export async function markMaterialCompleted(userId: string, material: LibraryMaterialRow) {
@@ -56,9 +67,18 @@ export async function markMaterialCompleted(userId: string, material: LibraryMat
       eventName: "material_completed",
       materialId: material.id,
       category: material.category,
-      metadata: { topic: material.topic },
+      metadata: {
+        topic: material.topic,
+        slug: material.slug,
+        title: material.title,
+        route: material.category,
+        status: "completed",
+      },
     });
   }
+
+  await refreshLibraryUserProfile(userId);
+  await cancelLibraryFollowup(userId);
 
   return getCategoryProgress(userId, material.category);
 }

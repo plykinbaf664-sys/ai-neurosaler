@@ -72,7 +72,7 @@ The Supabase adapter uses explicit column lists, keeps only bounded message hist
 
 ## Ecosystem library
 
-The optional Telegram/web library is isolated behind a feature flag. Apply `supabase/sql/007_library_foundation.sql`, set a random server-only signing secret of at least 24 characters, then enable it:
+The optional Telegram/web library is isolated behind a feature flag. Apply the Supabase migrations through `supabase/sql/009_library_memory_and_followups.sql`, set a random server-only signing secret of at least 24 characters, then enable it:
 
 ```env
 LIBRARY_ENABLED=true
@@ -80,6 +80,18 @@ LIBRARY_LINK_SECRET=replace-with-a-long-random-secret
 ```
 
 With `LIBRARY_ENABLED=false` or when the variable is omitted, `/start` follows the existing marketing flow. When enabled, `/start` shows marketing, AI for life and AI for business. Material links contain a short-lived signed token and never expose a Telegram user ID.
+
+Library openings and completions are stored as compact events and progress rows. A bounded profile snapshot keeps only route/category/topic/material context and follow-up timestamps; message history remains capped at 12 entries.
+
+Library follow-ups use a separate cron route and are off by default:
+
+```env
+LIBRARY_FOLLOWUPS_ENABLED=true
+LIBRARY_FOLLOWUP_DELAY_HOURS=24
+LIBRARY_FOLLOWUP_INACTIVITY_HOURS=12
+```
+
+The handler sends only due material check-ins, skips recently active users and enforces at most one library follow-up per user per day. Set `LIBRARY_FOLLOWUPS_ENABLED=false` to disable scheduling and sending without affecting gift follow-ups.
 
 ## Environment
 
