@@ -12,6 +12,8 @@ type PostQuizIntentParams = {
   hasDocument: boolean;
 };
 
+const URL_PATTERN = /https?:\/\/[^\s<>()"']+/i;
+
 function normalizeText(text: string) {
   return text.trim().toLowerCase();
 }
@@ -61,18 +63,42 @@ function isMaterialText(text: string) {
     return true;
   }
 
-  if (text.match(/https?:\/\/[^\s<>()"']+/i)) {
-    return true;
-  }
-
   return !isQuestionText(text) && hasAny(text, ["лендинг", "сайт", "pdf", "презентац", "описание продукта", "оффер", "файл", "материал"]);
+}
+
+function requestsMaterialAnalysis(text: string) {
+  return hasAny(text, [
+    "посмотри",
+    "посмотрите",
+    "глянь",
+    "разбери",
+    "разберите",
+    "разбор",
+    "проанализируй",
+    "проанализируйте",
+    "анализ",
+    "что думаешь",
+    "что скажешь",
+    "оцени",
+    "проверь",
+  ]);
+}
+
+export function shouldClarifyBareUrl(text: string) {
+  const normalized = normalizeText(text);
+  return URL_PATTERN.test(normalized) && !requestsMaterialAnalysis(normalized) && !hasAny(normalized, ["аудит", "нейроаудит"]);
 }
 
 export function detectPostQuizIntent(params: PostQuizIntentParams): PostQuizIntent {
   const stage = params.currentStage ?? "";
   const text = normalizeText(params.text);
+  const hasUrl = URL_PATTERN.test(text);
 
-  if (params.hasDocument || isMaterialText(text)) {
+  if (
+    params.hasDocument ||
+    (hasUrl && (stage === "materials_requested" || requestsMaterialAnalysis(text))) ||
+    (!hasUrl && isMaterialText(text))
+  ) {
     return "material_provided";
   }
 

@@ -197,6 +197,19 @@
       "is_active": true,
       "created_at": "2026-08-28T00:00:00.000Z",
       "updated_at": "2026-08-28T00:00:00.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8002-000000000103",
+      "slug": "kak-delat-ai-dizajn-kotoryj-ne-vyglyadit-kak-ai",
+      "title": "Как делать AI-дизайн, который не выглядит как AI",
+      "short_description": "Практический гайд: как собрать собственный визуальный стиль, создавать карусели и рекламные креативы с AI и сократить расходы на рутинный дизайн.",
+      "category": "business",
+      "topic": "ai_design",
+      "url": "https://telegra.ph/Kak-delat-AI-dizajn-kotoryj-ne-vyglyadit-kak-AI-09-06",
+      "position": 2,
+      "is_active": true,
+      "created_at": "2026-09-06T00:00:00.000Z",
+      "updated_at": "2026-09-06T00:00:00.000Z"
     }
   ],
   "libraryProgress": [],

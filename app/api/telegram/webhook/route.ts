@@ -53,7 +53,7 @@ import {
   parseMarketingRoiQuizAnswer,
   type MarketingRoiQuizAnswerKey,
 } from "@/lib/neiroclozer/marketing-roi-quiz";
-import { detectPostQuizIntent } from "@/lib/neiroclozer/post-quiz-intent";
+import { detectPostQuizIntent, shouldClarifyBareUrl } from "@/lib/neiroclozer/post-quiz-intent";
 import {
   answerCallbackQuery,
   getTelegramFileDownloadUrl,
@@ -70,6 +70,8 @@ function buildGiftText(giftMessage: string, giftUrl: string) {
 }
 
 const GIFT_FOLLOWUP_DELAY_MS = 15 * 60 * 1000;
+const BARE_URL_CLARIFICATION_TEXT =
+  "Ссылку получил. Что хочешь с ней сделать — посмотреть, разобрать или использовать как контекст?";
 function isStartCommand(text: string) {
   return text.trim().toLowerCase() === "/start";
 }
@@ -570,7 +572,10 @@ async function handlePostQuizMaterialsFlow(
     return;
   }
 
-  if (isKnowledgeQuestion(incomingMessage.text) || intent === "user_question") {
+  if (
+    (intent !== "material_provided" && isKnowledgeQuestion(incomingMessage.text)) ||
+    intent === "user_question"
+  ) {
     await sendAndStoreKnowledgeReply({
       chatId: incomingMessage.telegramChatId,
       lead,
@@ -936,7 +941,14 @@ export async function POST(request: Request) {
     existingLead = libraryAction.lead ?? existingLead;
     const marketingFlowActive =
       isMarketingRoiQuizStage(existingLead?.current_stage) || isPostQuizStage(existingLead?.current_stage);
+    const clarifyBareUrl = Boolean(
+      existingLead &&
+        !isMarketingRoiQuizStage(existingLead.current_stage) &&
+        existingLead.current_stage !== POST_QUIZ_STAGES.materialsRequested &&
+        shouldClarifyBareUrl(incomingMessage.text),
+    );
     if (
+      !clarifyBareUrl &&
       await handleLibraryContextMessage({
         message: incomingMessage,
         expertProfile,
@@ -1030,6 +1042,16 @@ export async function POST(request: Request) {
       text: incomingMessage.text,
       messageType: "user",
     });
+
+    if (clarifyBareUrl) {
+      await sendAndStorePlainText(
+        incomingMessage.telegramChatId,
+        lead.id,
+        expertProfile.id,
+        BARE_URL_CLARIFICATION_TEXT,
+      );
+      return Response.json({ ok: true, urlClarification: true });
+    }
 
     if (isNewLead || shouldRestartQuiz) {
       const welcomeResult = await sendTextMessage(incomingMessage.telegramChatId, expertProfile.welcome_message);
