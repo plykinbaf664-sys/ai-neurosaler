@@ -10,7 +10,7 @@ import {
 } from "@/lib/storage";
 import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibraryEnabled } from "@/lib/library/config";
 import { getMaterialById } from "@/lib/library/materials";
-import { getCategoryProgress, markMaterialCompleted } from "@/lib/library/progress";
+import { getCategoryProgress, markMaterialCompleted, markMaterialOpened } from "@/lib/library/progress";
 import {
   buildContextualLibraryReply,
   getNextMaterialAfter,
@@ -24,7 +24,6 @@ import {
   rememberLibraryUserMessage,
   setConversationRoute,
 } from "@/lib/library/user-profile";
-import { createLibraryToken } from "@/lib/security/library-token";
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
 
@@ -196,17 +195,8 @@ async function showMaterial(
   lead: LeadRow,
   expertProfileId: string,
   material: LibraryMaterialRow,
-  publicBaseUrl: string,
 ) {
-  const token = createLibraryToken({
-    userId: lead.id,
-    materialId: material.id,
-    category: material.category,
-    slug: material.slug,
-  });
-  const openUrl = new URL("/api/library/open", publicBaseUrl);
-  openUrl.searchParams.set("token", token);
-
+  await markMaterialOpened(lead.id, material);
   const progress = await getCategoryProgress(lead.id, material.category);
   await trackUserEvent({
     userId: lead.id,
@@ -231,7 +221,7 @@ async function showMaterial(
     `**${material.title}**\n\n${material.short_description}\n\nОткрой материал, затем вернись сюда и отметь его прочитанным.\n\nИзучено ${progress.completed} из ${progress.total}`,
     {
       inline_keyboard: [
-        [{ text: "Открыть материал", url: openUrl.toString() }],
+        [{ text: "Открыть материал", url: material.url }],
         [{ text: "✅ Я прочитал", callback_data: `${COMPLETE_PREFIX}${material.id}` }],
         [{ text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` }],
         [{ text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${material.category}` }],
@@ -248,7 +238,7 @@ export async function handleLibraryTelegramAction(input: {
 }): Promise<LibraryTelegramResult> {
   if (!isLibraryEnabled()) return { handled: false, startMarketing: false };
 
-  const { message, expertProfile, publicBaseUrl } = input;
+  const { message, expertProfile } = input;
   const isStart = message.text.trim().toLowerCase() === "/start";
   const isLibraryAction =
     message.text === MAIN_MENU_ACTION ||
@@ -312,7 +302,7 @@ export async function handleLibraryTelegramAction(input: {
     const category = message.text.slice(CONTINUE_PREFIX.length);
     if (!getLibraryCategory(category)) return { handled: true, startMarketing: false, lead };
     const material = await getNextRecommendedMaterial(lead.id, category);
-    if (material) await showMaterial(message, lead, expertProfile.id, material, publicBaseUrl);
+    if (material) await showMaterial(message, lead, expertProfile.id, material);
     else {
       await sendAndStore(
         message.telegramChatId,
@@ -378,7 +368,7 @@ export async function handleLibraryTelegramAction(input: {
           category: nextMaterial.category,
           metadata: { from_material_id: currentMaterial.id },
         });
-        await showMaterial(message, lead, expertProfile.id, nextMaterial, publicBaseUrl);
+        await showMaterial(message, lead, expertProfile.id, nextMaterial);
       } else {
         await sendAndStore(
           message.telegramChatId,
@@ -398,7 +388,7 @@ export async function handleLibraryTelegramAction(input: {
 
   if (message.text.startsWith(MATERIAL_PREFIX)) {
     const material = await getMaterialById(message.text.slice(MATERIAL_PREFIX.length));
-    if (material?.is_active) await showMaterial(message, lead, expertProfile.id, material, publicBaseUrl);
+    if (material?.is_active) await showMaterial(message, lead, expertProfile.id, material);
     return { handled: true, startMarketing: false, lead };
   }
 
