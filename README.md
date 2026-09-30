@@ -129,12 +129,16 @@ Set your numeric Telegram user ID in `TELEGRAM_ADMIN_USER_ID`, restart the app a
 
 Available sections:
 
-- **Statistics** — total/new leads, qualification and conversion rates, dialogue and message counts;
+- **Funnel** — unique people at each marketing and library step, for new-user cohorts of 7/30 days or all time;
+- **Clicks** — event counts by section and material, including tracked material and gift links;
+- **Database** — live storage driver and record counts;
 - **Leads CSV** — a document with Telegram usernames, names, statuses, stages, warmth, offer, message count and timestamps;
 - **Dialogues** — recent leads by username with the latest incoming and outgoing messages;
 - **Settings** — persistent `quiz/gift` entry-mode switching and gift follow-up enable/disable.
 
-Only whitelisted operational settings can be changed from Telegram; arbitrary environment variables and secrets are never exposed. Changes are persisted in `.data/neurosaler.json` and override their initial environment defaults.
+Only whitelisted operational settings can be changed from Telegram; arbitrary environment variables and secrets are never exposed. Local settings are persisted in `.data/neurosaler.json`. With Supabase, apply `supabase/sql/011_runtime_settings.sql` before using the settings buttons; changes are then persisted in `runtime_settings`. If the migration is absent, environment defaults remain active and settings changes fail instead of appearing to succeed.
+
+Click events are counted from the deployment that introduces them. A Telegram bot link opening alone cannot be tracked; the user must press Start. Library material buttons use signed tracked links valid for 30 days.
 
 ## Run and verify
 

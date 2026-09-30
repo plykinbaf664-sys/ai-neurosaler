@@ -70,6 +70,7 @@ export const localStorageAdapter: StorageAdapter = {
   getRuntimeSettings: localStore.getRuntimeSettings,
   updateRuntimeSettings: localStore.updateRuntimeSettings,
   getAdminOverview: localStore.getAdminOverview,
+  getAdminAnalytics: localStore.getAdminAnalytics,
   getAdminLeads: localStore.getAdminLeads,
   getRecentLeadDialogues: localStore.getRecentLeadDialogues,
   getLeadDialogue(leadId, limit = MAX_MESSAGE_HISTORY) {

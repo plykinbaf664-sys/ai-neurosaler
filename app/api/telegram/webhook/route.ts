@@ -21,6 +21,7 @@ import {
 } from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
 import { handleLibraryContextMessage, handleLibraryTelegramAction } from "@/lib/library/telegram";
+import { trackUserEvent } from "@/lib/tracking/events";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
 import {
@@ -1139,6 +1140,11 @@ export async function POST(request: Request) {
       }
 
       const nextStage = getNextMarketingRoiQuizStage(updatedLead.current_stage);
+      await trackUserEvent({
+        userId: lead.id,
+        eventName: "marketing_quiz_answered",
+        metadata: { question: updatedLead.current_stage },
+      });
 
       if (nextStage !== MARKETING_ROI_QUIZ_STAGES.completed) {
         await sendMarketingRoiQuizQuestion(incomingMessage.telegramChatId, lead.id, expertProfile.id, nextStage);
@@ -1182,6 +1188,7 @@ export async function POST(request: Request) {
         matchedOffer: "diagnostic",
         warmthLevel: "warm",
       });
+      await trackUserEvent({ userId: lead.id, eventName: "marketing_quiz_completed" });
     } else if (isExistingPostQuizStage) {
       const [offers, faq, objections, recentMessages] = await Promise.all([
         getActiveExpertOffers(expertProfile.id),

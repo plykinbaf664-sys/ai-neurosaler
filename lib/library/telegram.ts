@@ -26,6 +26,7 @@ import {
 } from "@/lib/library/user-profile";
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
+import { createLibraryToken } from "@/lib/security/library-token";
 
 const MAIN_MENU_ACTION = "nav:menu";
 const MARKETING_ACTION = "nav:marketing";
@@ -195,6 +196,7 @@ async function showMaterial(
   lead: LeadRow,
   expertProfileId: string,
   material: LibraryMaterialRow,
+  publicBaseUrl: string,
 ) {
   await markMaterialOpened(lead.id, material);
   const progress = await getCategoryProgress(lead.id, material.category);
@@ -214,6 +216,14 @@ async function showMaterial(
   await refreshLibraryUserProfile(lead.id);
   if (progress.statuses.get(material.id) !== "opened") await cancelLibraryFollowup(lead.id);
 
+  const trackedUrl = new URL("/api/library/open", publicBaseUrl);
+  trackedUrl.searchParams.set("token", createLibraryToken({
+    userId: lead.id,
+    materialId: material.id,
+    category: material.category,
+    slug: material.slug,
+  }, 30 * 24 * 60 * 60));
+
   await sendAndStore(
     message.telegramChatId,
     lead,
@@ -221,7 +231,7 @@ async function showMaterial(
     `**${material.title}**\n\n${material.short_description}\n\nОткрой материал, затем вернись сюда и отметь его прочитанным.\n\nИзучено ${progress.completed} из ${progress.total}`,
     {
       inline_keyboard: [
-        [{ text: "Открыть материал", url: material.url }],
+        [{ text: "Открыть материал", url: trackedUrl.toString() }],
         [{ text: "✅ Я прочитал", callback_data: `${COMPLETE_PREFIX}${material.id}` }],
         [{ text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` }],
         [{ text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${material.category}` }],
@@ -256,6 +266,7 @@ export async function handleLibraryTelegramAction(input: {
 
   if (message.text === MARKETING_ACTION) {
     await setConversationRoute(lead.id, "marketing");
+    await trackUserEvent({ userId: lead.id, eventName: "marketing_selected" });
     return { handled: false, startMarketing: true, lead };
   }
 
@@ -302,7 +313,7 @@ export async function handleLibraryTelegramAction(input: {
     const category = message.text.slice(CONTINUE_PREFIX.length);
     if (!getLibraryCategory(category)) return { handled: true, startMarketing: false, lead };
     const material = await getNextRecommendedMaterial(lead.id, category);
-    if (material) await showMaterial(message, lead, expertProfile.id, material);
+    if (material) await showMaterial(message, lead, expertProfile.id, material, input.publicBaseUrl);
     else {
       await sendAndStore(
         message.telegramChatId,
@@ -368,7 +379,7 @@ export async function handleLibraryTelegramAction(input: {
           category: nextMaterial.category,
           metadata: { from_material_id: currentMaterial.id },
         });
-        await showMaterial(message, lead, expertProfile.id, nextMaterial);
+        await showMaterial(message, lead, expertProfile.id, nextMaterial, input.publicBaseUrl);
       } else {
         await sendAndStore(
           message.telegramChatId,
@@ -388,7 +399,7 @@ export async function handleLibraryTelegramAction(input: {
 
   if (message.text.startsWith(MATERIAL_PREFIX)) {
     const material = await getMaterialById(message.text.slice(MATERIAL_PREFIX.length));
-    if (material?.is_active) await showMaterial(message, lead, expertProfile.id, material);
+    if (material?.is_active) await showMaterial(message, lead, expertProfile.id, material, input.publicBaseUrl);
     return { handled: true, startMarketing: false, lead };
   }
 

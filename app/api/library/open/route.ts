@@ -2,6 +2,7 @@ import { getMaterialById } from "@/lib/library/materials";
 import { markMaterialOpened } from "@/lib/library/progress";
 import { isLibraryEnabled } from "@/lib/library/config";
 import { verifyLibraryToken } from "@/lib/security/library-token";
+import { trackUserEvent } from "@/lib/tracking/events";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,13 @@ export async function GET(request: Request) {
     return new Response("Material not found.", { status: 404 });
   }
 
+  await trackUserEvent({
+    userId: payload.userId,
+    eventName: "material_link_clicked",
+    materialId: material.id,
+    category: material.category,
+    metadata: { title: material.title },
+  });
   await markMaterialOpened(payload.userId, material);
   const canonicalPath = `/library/${encodeURIComponent(material.category)}/${encodeURIComponent(material.slug)}`;
   const configuredDestination = new URL(material.url, request.url);

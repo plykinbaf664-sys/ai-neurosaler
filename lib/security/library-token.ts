@@ -28,11 +28,12 @@ function sign(encodedPayload: string) {
 
 export function createLibraryToken(
   input: Pick<LibraryTokenPayload, "userId" | "materialId" | "category" | "slug">,
+  ttlSeconds = TOKEN_TTL_SECONDS,
 ) {
   const payload: LibraryTokenPayload = {
     version: 1,
     ...input,
-    expiresAt: Math.floor(Date.now() / 1_000) + TOKEN_TTL_SECONDS,
+    expiresAt: Math.floor(Date.now() / 1_000) + ttlSeconds,
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   return `${encodedPayload}.${sign(encodedPayload)}`;

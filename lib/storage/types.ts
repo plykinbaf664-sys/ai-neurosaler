@@ -207,10 +207,15 @@ export type LibraryProgressRow = {
 
 export type UserEventName =
   | "library_opened"
+  | "marketing_selected"
+  | "marketing_quiz_answered"
+  | "marketing_quiz_completed"
   | "category_selected"
   | "material_opened"
   | "material_presented"
   | "material_completed"
+  | "material_link_clicked"
+  | "gift_link_clicked"
   | "next_material_clicked"
   | "library_returned"
   | "library_dialogue_message"
@@ -281,6 +286,7 @@ export interface StorageAdapter {
   getRuntimeSettings(): Promise<RuntimeSettings>;
   updateRuntimeSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings>;
   getAdminOverview(): Promise<AdminOverview>;
+  getAdminAnalytics(period: import("@/lib/admin-analytics").AnalyticsPeriod): Promise<import("@/lib/admin-analytics").AdminAnalytics>;
   getAdminLeads(): Promise<AdminLeadRow[]>;
   getRecentLeadDialogues(limit?: number): Promise<AdminLeadRow[]>;
   getLeadDialogue(leadId: string, limit?: number): Promise<{ lead: LeadRow | null; messages: MessageRow[] }>;

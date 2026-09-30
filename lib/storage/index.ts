@@ -95,6 +95,10 @@ export function getAdminOverview() {
   return getStorageAdapter().getAdminOverview();
 }
 
+export function getAdminAnalytics(period: import("@/lib/admin-analytics").AnalyticsPeriod) {
+  return getStorageAdapter().getAdminAnalytics(period);
+}
+
 export function getAdminLeads() {
   return getStorageAdapter().getAdminLeads();
 }

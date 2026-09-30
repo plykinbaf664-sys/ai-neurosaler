@@ -1,4 +1,5 @@
 import { getLeadById, updateLeadById } from "@/lib/storage";
+import { trackUserEvent } from "@/lib/tracking/events";
 
 function isSafeRedirect(value: string) {
   try {
@@ -25,6 +26,8 @@ export async function GET(
   if (!lead) {
     return Response.json({ ok: false, error: "Lead not found." }, { status: 404 });
   }
+
+  await trackUserEvent({ userId: lead.id, eventName: "gift_link_clicked" });
 
   if (!lead.gift_link_clicked_at) {
     await updateLeadById(leadId, {

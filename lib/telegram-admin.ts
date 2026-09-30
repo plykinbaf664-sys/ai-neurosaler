@@ -1,25 +1,32 @@
 import {
+  getAdminAnalytics,
   getAdminLeads,
   getAdminOverview,
   getLeadDialogue,
   getRecentLeadDialogues,
   getRuntimeSettings,
+  getStorageSummary,
   updateRuntimeSettings,
 } from "@/lib/storage";
 import { sendDocument, sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
+import type { AnalyticsPeriod } from "@/lib/admin-analytics";
 
 const ADMIN_PREFIX = "admin:";
 
 function getAdminUserId() {
   const value = Number(process.env.TELEGRAM_ADMIN_USER_ID);
-  return Number.isSafeInteger(value) ? value : null;
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function menuMarkup() {
   return {
     inline_keyboard: [
       [
-        { text: "📊 Статистика", callback_data: "admin:stats" },
+        { text: "📊 Воронка", callback_data: "admin:flow:7" },
+        { text: "👆 Клики", callback_data: "admin:clicks:7" },
+      ],
+      [
+        { text: "🗄 База", callback_data: "admin:health" },
         { text: "📁 Лиды CSV", callback_data: "admin:leads" },
       ],
       [
@@ -44,7 +51,65 @@ function csvCell(value: unknown) {
 }
 
 async function showMenu(chatId: number) {
-  await sendTextMessage(chatId, "**Админка NeuroSeller**\n\nВыберите раздел:", menuMarkup());
+  const stats = await getAdminOverview();
+  await sendTextMessage(
+    chatId,
+    `**NeuroSeller · админка**\n👥 ${stats.totalLeads} человек · +${stats.leadsWeek} за 7 дней\n🎯 ${stats.qualified} квалифицировано · ${stats.converted} передано`,
+    menuMarkup(),
+  );
+}
+
+function periodMarkup(section: "flow" | "clicks", selected: AnalyticsPeriod) {
+  return {
+    inline_keyboard: [
+      ([7, 30, 0] as const).map((period) => ({
+        text: `${selected === period ? "✓ " : ""}${period ? `${period} дн` : "Всё"}`,
+        callback_data: `admin:${section}:${period}`,
+      })),
+      [{ text: "← Меню", callback_data: "admin:menu" }],
+    ],
+  };
+}
+
+function parsePeriod(value: string): AnalyticsPeriod {
+  return value === "30" ? 30 : value === "0" ? 0 : 7;
+}
+
+async function showFlow(chatId: number, period: AnalyticsPeriod) {
+  const data = await getAdminAnalytics(period);
+  await sendTextMessage(chatId, [
+    `**Воронка · ${period ? `${period} дн` : "всё время"}**`,
+    `👥 Вошли: ${data.people} · меню: ${data.menu}`,
+    `📊 Маркетинг: ${data.marketing} → квиз ${data.quizAnswers.join("/")} → итог ${data.quizCompleted}`,
+    `🎯 Квалифицированы: ${data.qualified} · переданы: ${data.handoff}`,
+    `📚 Раздел: ${data.category} (жизнь ${data.life} / бизнес ${data.business})`,
+    `Материал: ${data.materialSelected} → ссылка ${data.materialLinkClicked} → завершили ${data.materialCompleted}`,
+    `🎁 Подарок: ${data.giftClicked}`,
+    "Люди без повторов; для периода — когорта новых пользователей.",
+  ].join("\n"), periodMarkup("flow", period));
+}
+
+async function showClicks(chatId: number, period: AnalyticsPeriod) {
+  const data = await getAdminAnalytics(period);
+  await sendTextMessage(chatId, [
+    `**Клики · ${period ? `${period} дн` : "всё время"}**`,
+    `Разделы: ${data.clicks.category} · материалы в боте: ${data.clicks.material}`,
+    `Жизнь ${data.categoryClicks.life} · бизнес ${data.categoryClicks.business}`,
+    `Ссылки на материалы: ${data.clicks.link} · далее: ${data.clicks.next}`,
+    `Подарок: ${data.clicks.gift}`,
+    ...data.topMaterials.map((item) => `• ${item.title.slice(0, 34)}: ${item.clicks}`),
+    "События с повторами; отдельные клики считаются с обновления трекинга.",
+  ].join("\n"), periodMarkup("clicks", period));
+}
+
+async function showHealth(chatId: number) {
+  const storage = await getStorageSummary();
+  await sendTextMessage(chatId, [
+    "**База данных**",
+    `Хранилище: ${storage.mode === "supabase" ? "Supabase · доступно" : storage.mode}`,
+    `Лиды: ${storage.leads} · сообщения: ${storage.messages} · материалы: ${storage.materials}`,
+    "Квота и размер БД доступны в панели Supabase.",
+  ].join("\n"), backMarkup());
 }
 
 async function showStats(chatId: number) {
@@ -191,6 +256,9 @@ export async function handleTelegramAdminMessage(message: TelegramPrivateTextMes
 
   if (action === "admin:menu") await showMenu(message.telegramChatId);
   else if (action === "admin:stats") await showStats(message.telegramChatId);
+  else if (action.startsWith("admin:flow:")) await showFlow(message.telegramChatId, parsePeriod(action.slice(11)));
+  else if (action.startsWith("admin:clicks:")) await showClicks(message.telegramChatId, parsePeriod(action.slice(13)));
+  else if (action === "admin:health") await showHealth(message.telegramChatId);
   else if (action === "admin:leads") await exportLeads(message.telegramChatId);
   else if (action === "admin:dialogs") await showDialogues(message.telegramChatId);
   else if (action === "admin:settings") await showSettings(message.telegramChatId);

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { buildAdminAnalytics, type AnalyticsPeriod } from "@/lib/admin-analytics";
 
 import seedDatabase from "@/data/local-db.seed.json";
 
@@ -188,10 +189,15 @@ type LibraryProgressRow = {
 
 type UserEventName =
   | "library_opened"
+  | "marketing_selected"
+  | "marketing_quiz_answered"
+  | "marketing_quiz_completed"
   | "category_selected"
   | "material_opened"
   | "material_presented"
   | "material_completed"
+  | "material_link_clicked"
+  | "gift_link_clicked"
   | "next_material_clicked"
   | "library_returned"
   | "library_dialogue_message"
@@ -693,6 +699,10 @@ export async function getAdminOverview() {
       outgoingMessages: database.messages.filter((message) => message.direction === "outgoing").length,
     };
   });
+}
+
+export async function getAdminAnalytics(period: AnalyticsPeriod) {
+  return readDatabase((database) => buildAdminAnalytics(database.leads, database.userEvents, period));
 }
 
 export async function getAdminLeads() {

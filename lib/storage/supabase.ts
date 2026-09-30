@@ -1,4 +1,5 @@
 import "server-only";
+import { buildAdminAnalytics, type AnalyticsEvent, type AnalyticsLead, type AnalyticsPeriod } from "@/lib/admin-analytics";
 
 import {
   MAX_MATERIALS_PER_LEAD,
@@ -105,6 +106,16 @@ async function supabaseRequest<T>(
 
 async function selectRows<T>(resource: string, query: Record<string, QueryValue>) {
   return (await supabaseRequest<T[]>(resource, query)).data;
+}
+
+async function selectAllRows<T>(resource: string, query: Record<string, QueryValue>) {
+  const pageSize = 1_000;
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await selectRows<T>(resource, { ...query, limit: pageSize, offset });
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
 }
 
 async function selectOne<T>(resource: string, query: Record<string, QueryValue>) {
@@ -223,8 +234,23 @@ function getDefaultRuntimeSettings(): RuntimeSettings {
   };
 }
 
-const settingsKey = Symbol.for("ai-neurosaler.supabase-runtime-settings");
-const globalWithSettings = globalThis as typeof globalThis & { [settingsKey]?: RuntimeSettings };
+type RuntimeSettingsRow = {
+  entry_flow_mode: RuntimeSettings["entryFlowMode"];
+  gift_followups_enabled: boolean;
+};
+
+async function readRuntimeSettingsRow() {
+  try {
+    return await selectOne<RuntimeSettingsRow>("runtime_settings", {
+      select: "entry_flow_mode,gift_followups_enabled",
+      id: "eq.1",
+    });
+  } catch (error) {
+    // Keep the bot available until migration 011 has been applied.
+    if (error instanceof Error && /PGRST205|runtime_settings failed \(404\)/.test(error.message)) return null;
+    throw error;
+  }
+}
 
 async function pruneSupabaseMessages(leadId: string) {
   const staleRows = await selectRows<{ id: string }>("messages", {
@@ -439,11 +465,18 @@ export const supabaseStorageAdapter: StorageAdapter = {
     };
   },
   async getRuntimeSettings() {
-    return globalWithSettings[settingsKey] ?? getDefaultRuntimeSettings();
+    const row = await readRuntimeSettingsRow();
+    return row
+      ? { entryFlowMode: row.entry_flow_mode, giftFollowupsEnabled: row.gift_followups_enabled }
+      : getDefaultRuntimeSettings();
   },
   async updateRuntimeSettings(input) {
-    const next = { ...(globalWithSettings[settingsKey] ?? getDefaultRuntimeSettings()), ...input };
-    globalWithSettings[settingsKey] = next;
+    const next = { ...(await this.getRuntimeSettings()), ...input };
+    await supabaseRequest("runtime_settings", { on_conflict: "id" }, {
+      method: "POST",
+      body: { id: 1, entry_flow_mode: next.entryFlowMode, gift_followups_enabled: next.giftFollowupsEnabled },
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
     return next;
   },
   async getAdminOverview() {
@@ -475,6 +508,23 @@ export const supabaseStorageAdapter: StorageAdapter = {
       incomingMessages,
       outgoingMessages,
     };
+  },
+  async getAdminAnalytics(period: AnalyticsPeriod) {
+    const now = Date.now();
+    const cutoff = period ? new Date(now - period * 86_400_000).toISOString() : null;
+    const [leads, events] = await Promise.all([
+      selectAllRows<AnalyticsLead>("leads", {
+        select: "id,created_at,status,current_stage,gift_link_clicked_at",
+        ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
+        order: "created_at.asc,id.asc",
+      }),
+      selectAllRows<AnalyticsEvent>("user_events", {
+        select: "user_id,event_name,category,metadata,created_at",
+        ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
+        order: "created_at.asc,id.asc",
+      }),
+    ]);
+    return buildAdminAnalytics(leads, events, period, now);
   },
   getAdminLeads: getSupabaseAdminLeads,
   async getRecentLeadDialogues(limit = 8) {
