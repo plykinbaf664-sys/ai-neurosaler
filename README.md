@@ -156,6 +156,30 @@ npx tsc --noEmit
 npm run build
 ```
 
+## October library materials and prediction ball
+
+Apply `supabase/sql/012_sales_audit_and_decision_materials.sql` and
+`supabase/sql/013_prediction_ball_daily_limit.sql` before deploying the prediction ball.
+Migration 012 safely upserts the two Telegraph materials and appends new entries per category;
+repeating it preserves IDs and positions. Local storage merges the same materials from the seed.
+
+The life category has a separate `🔮 Шар предсказаний` button. `/start ball` (also
+`/start@BotUsername ball`) opens it directly, even when the library flag is disabled.
+It does not contribute to library progress or rewards. A successful spin records
+`prediction_ball_spun` with `metadata.result` in existing `user_events`; the SQL function
+locks the existing lead row while checking the rolling 24-hour limit and recording the spin.
+Early attempts show the configured warning as a Telegram alert, preserving the previous result
+and its share button. Local storage uses its existing serialized write queue for the same check.
+Local memory mode retains its existing non-persistent behavior; production uses Supabase.
+
+Bot username is resolved with Telegram `getMe` and cached. Sharing uses the standard
+Telegram share URL with the complete result text and `start=ball` deep link; Telegram clients
+may additionally prepend the URL to the text. No AI, assets, tables or frontend are involved.
+
+Run `node --test tests/*.test.mjs` with Node 24 to check materials, progress, duplicate completion,
+rewards, ball animation/sharing, concurrent spins, the 24-hour boundary, start routing,
+marketing quiz, AI dialogue and handoff. Tests use isolated in-memory data and mocked network calls.
+
 ## Telegram smoke test
 
 1. Start the app with a public HTTPS URL.

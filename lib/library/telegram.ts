@@ -27,6 +27,7 @@ import {
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
 import { createLibraryToken } from "@/lib/security/library-token";
+import { BALL_OPEN_ACTION, handlePredictionBall, isPredictionBallAction } from "@/lib/prediction-ball";
 
 const MAIN_MENU_ACTION = "nav:menu";
 const MARKETING_ACTION = "nav:marketing";
@@ -58,11 +59,18 @@ function mainMenuMarkup() {
 function categoryNavigationMarkup(category: string) {
   return {
     inline_keyboard: [
+      ...predictionBallButtons(category),
       [{ text: "Продолжить", callback_data: `${CONTINUE_PREFIX}${category}` }],
       [{ text: "Посмотреть все материалы", callback_data: `${ALL_PREFIX}${category}` }],
       [{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }],
     ],
   };
+}
+
+function predictionBallButtons(category: string) {
+  return category === "life"
+    ? [[{ text: "🔮 Шар предсказаний", callback_data: BALL_OPEN_ACTION }]]
+    : [];
 }
 
 async function ensureLibraryLead(
@@ -168,7 +176,7 @@ async function showAllMaterials(
       lead,
       expertProfileId,
       `В категории «${getLibraryCategoryLabel(category)}» пока нет активных материалов.`,
-      { inline_keyboard: [[{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]] },
+      { inline_keyboard: [...predictionBallButtons(category), [{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]] },
     );
     return;
   }
@@ -186,6 +194,7 @@ async function showAllMaterials(
         callback_data: `${MATERIAL_PREFIX}${material.id}`,
       },
     ]);
+    if (isFirst) buttons.unshift(...predictionBallButtons(category));
     if (isLast) buttons.push([{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]);
     await sendAndStore(message.telegramChatId, lead, expertProfileId, text, { inline_keyboard: buttons });
   }
@@ -246,6 +255,11 @@ export async function handleLibraryTelegramAction(input: {
   existingLead: LeadRow | null;
   publicBaseUrl: string;
 }): Promise<LibraryTelegramResult> {
+  if (isPredictionBallAction(input.message)) {
+    const lead = await ensureLibraryLead(input.message, input.expertProfile, input.existingLead);
+    await handlePredictionBall(input.message, lead.id);
+    return { handled: true, startMarketing: false, lead };
+  }
   if (!isLibraryEnabled()) return { handled: false, startMarketing: false };
 
   const { message, expertProfile } = input;

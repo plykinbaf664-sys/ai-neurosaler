@@ -206,6 +206,8 @@ export type LibraryProgressRow = {
 };
 
 export type UserEventName =
+  | "prediction_ball_opened"
+  | "prediction_ball_spun"
   | "library_opened"
   | "marketing_selected"
   | "marketing_quiz_answered"
@@ -300,6 +302,7 @@ export interface StorageAdapter {
     status: LibraryProgressStatus,
   ): Promise<LibraryProgressRow>;
   insertUserEvent(input: UserEventInsertInput): Promise<StoredRowRef>;
+  claimPredictionBallSpin(userId: string, result: string): Promise<boolean>;
   hasUserEvent(userId: string, eventName: UserEventName, category?: string | null): Promise<boolean>;
   getRecentUserEvents(userId: string, limit?: number): Promise<UserEventRow[]>;
   getUserLibraryProfile(userId: string): Promise<UserLibraryProfileRow | null>;

@@ -188,6 +188,8 @@ type LibraryProgressRow = {
 };
 
 type UserEventName =
+  | "prediction_ball_opened"
+  | "prediction_ball_spun"
   | "library_opened"
   | "marketing_selected"
   | "marketing_quiz_answered"
@@ -831,6 +833,27 @@ export async function hasUserEvent(userId: string, eventName: UserEventName, cat
         (category === undefined || event.category === category),
     ),
   );
+}
+
+export async function claimPredictionBallSpin(userId: string, result: string) {
+  return mutateDatabase((database) => {
+    const now = Date.now();
+    if (database.userEvents.some((event) =>
+      event.user_id === userId && event.event_name === "prediction_ball_spun" &&
+      Date.parse(event.created_at) > now - 86_400_000,
+    )) return false;
+
+    database.userEvents.push({
+      id: randomUUID(),
+      user_id: userId,
+      event_name: "prediction_ball_spun",
+      material_id: null,
+      category: null,
+      metadata: { result },
+      created_at: new Date(now).toISOString(),
+    });
+    return true;
+  });
 }
 
 export async function getRecentUserEvents(userId: string, limit = 100) {

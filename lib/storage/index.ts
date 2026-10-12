@@ -139,6 +139,10 @@ export function insertUserEvent(input: import("@/lib/storage/types").UserEventIn
   return getStorageAdapter().insertUserEvent(input);
 }
 
+export function claimPredictionBallSpin(userId: string, result: string) {
+  return getStorageAdapter().claimPredictionBallSpin(userId, result);
+}
+
 export function hasUserEvent(
   userId: string,
   eventName: import("@/lib/storage/types").UserEventName,

@@ -210,6 +210,32 @@
       "is_active": true,
       "created_at": "2026-09-06T00:00:00.000Z",
       "updated_at": "2026-09-06T00:00:00.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8002-000000000104",
+      "slug": "vozmozhno-vam-ne-nuzhny-novye-lidy",
+      "title": "Возможно, вам не нужны новые лиды",
+      "short_description": "Загрузите потерянные переписки и найдите повторяющиеся утечки продаж: забытые follow-up, сделки без следующего шага, слабую диагностику и клиентов, которых ещё можно вернуть.",
+      "category": "business",
+      "topic": "sales_audit",
+      "url": "https://telegra.ph/Vozmozhno-vam-ne-nuzhny-novye-lidy-10-12",
+      "position": 3,
+      "is_active": true,
+      "created_at": "2026-10-13T00:00:00.000Z",
+      "updated_at": "2026-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8001-000000000104",
+      "slug": "ne-mozhesh-prinyat-reshenie-vot-proverennyj-sposob",
+      "title": "Не можешь принять решение? Вот проверенный способ",
+      "short_description": "Разберите сложное решение за 15 минут: отделите факты от страхов и предположений, найдите главный компромисс и поймите, что проверить перед выбором.",
+      "category": "life",
+      "topic": "decision_making",
+      "url": "https://telegra.ph/Ne-mozhesh-prinyat-reshenie-Vot-proverennyj-sposob-10-12",
+      "position": 4,
+      "is_active": true,
+      "created_at": "2026-10-13T00:00:00.000Z",
+      "updated_at": "2026-10-13T00:00:00.000Z"
     }
   ],
   "libraryProgress": [],

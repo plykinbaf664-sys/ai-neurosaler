@@ -82,6 +82,7 @@ export const localStorageAdapter: StorageAdapter = {
   getLibraryProgress: localStore.getLibraryProgress,
   upsertLibraryProgress: localStore.upsertLibraryProgress,
   insertUserEvent: localStore.insertUserEvent,
+  claimPredictionBallSpin: localStore.claimPredictionBallSpin,
   hasUserEvent: localStore.hasUserEvent,
   getRecentUserEvents: localStore.getRecentUserEvents,
   getUserLibraryProfile: localStore.getUserLibraryProfile,

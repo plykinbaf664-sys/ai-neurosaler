@@ -608,6 +608,12 @@ export const supabaseStorageAdapter: StorageAdapter = {
     ).data;
     return rows[0];
   },
+  async claimPredictionBallSpin(userId, result) {
+    return (await supabaseRequest<boolean>("rpc/claim_prediction_ball_spin", {}, {
+      method: "POST",
+      body: { p_user_id: userId, p_result: result },
+    })).data;
+  },
   async hasUserEvent(userId, eventName, category) {
     return (
       (await countRows("user_events", {

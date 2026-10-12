@@ -21,6 +21,7 @@ import {
 } from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
 import { handleLibraryContextMessage, handleLibraryTelegramAction } from "@/lib/library/telegram";
+import { BALL_SPIN_ACTION } from "@/lib/prediction-ball";
 import { trackUserEvent } from "@/lib/tracking/events";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
 import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
@@ -910,7 +911,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, ignored: true });
     }
 
-    if (incomingMessage.callbackQueryId) {
+    if (incomingMessage.callbackQueryId && incomingMessage.text !== BALL_SPIN_ACTION) {
       answerCallbackQuery(incomingMessage.callbackQueryId).catch((error) => {
         const message = error instanceof Error ? error.message : "Unknown callback answer error.";
         console.error("Telegram callback answer error:", message);

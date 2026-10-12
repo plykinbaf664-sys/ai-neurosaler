@@ -290,7 +290,7 @@ export async function getTelegramFileDownloadUrl(fileId: string) {
   return `https://api.telegram.org/file/bot${token}/${data.result.file_path}`;
 }
 
-export async function answerCallbackQuery(callbackQueryId: string) {
+export async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/answerCallbackQuery`, {
     method: "POST",
     headers: {
@@ -298,6 +298,7 @@ export async function answerCallbackQuery(callbackQueryId: string) {
     },
     body: JSON.stringify({
       callback_query_id: callbackQueryId,
+      ...(text ? { text, show_alert: true } : {}),
     }),
   });
 
@@ -305,6 +306,46 @@ export async function answerCallbackQuery(callbackQueryId: string) {
 
   if (!response.ok || !data.ok) {
     throw new Error(data.description || "Telegram answerCallbackQuery failed.");
+  }
+}
+
+let botUsername: Promise<string> | undefined;
+
+export function getTelegramBotUsername() {
+  return botUsername ??= (async () => {
+    const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/getMe`);
+    const data = await response.json() as { ok: boolean; result?: { username?: string }; description?: string };
+    if (!response.ok || !data.ok || !data.result?.username) {
+      throw new Error(data.description || "Telegram getMe failed.");
+    }
+    return data.result.username;
+  })().catch((error) => {
+    botUsername = undefined;
+    throw error;
+  });
+}
+
+export async function editTextMessage(chatId: number, messageId: number, text: string, replyMarkup?: TelegramReplyMarkup) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text: convertMarkdownToTelegramHtml(text),
+        parse_mode: "HTML",
+        reply_markup: replyMarkup ?? { inline_keyboard: [] },
+      }),
+    });
+    const data = await response.json() as TelegramSendMessageResponse & { parameters?: { retry_after?: number } };
+    if ((response.ok && data.ok) || data.description?.includes("message is not modified")) return;
+    const retryAfter = data.parameters?.retry_after;
+    if (response.status === 429 && attempt === 0 && retryAfter && retryAfter <= 30) {
+      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1_000));
+      continue;
+    }
+    throw new Error(data.description || "Telegram editMessageText failed.");
   }
 }
 
