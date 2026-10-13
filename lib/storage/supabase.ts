@@ -1,5 +1,5 @@
 import "server-only";
-import { buildAdminAnalytics, type AnalyticsEvent, type AnalyticsLead, type AnalyticsPeriod } from "@/lib/admin-analytics";
+import { ADMIN_ANALYTICS_EVENT_NAMES, createAdminAnalyticsAccumulator, type AnalyticsEvent, type AnalyticsLead, type AnalyticsPeriod } from "@/lib/admin-analytics";
 
 import {
   MAX_MATERIALS_PER_LEAD,
@@ -39,7 +39,7 @@ const FAQ_COLUMNS =
 const OBJECTION_COLUMNS =
   "id,expert_profile_id,objection,response,sort_order,is_active,created_at,updated_at";
 const LEAD_COLUMNS =
-  "id,expert_profile_id,telegram_user_id,telegram_chat_id,telegram_username,first_name,last_name,source,status,current_stage,matched_offer,last_user_message,warmth_level,gift_link_clicked_at,gift_followup_due_at,gift_followup_sent_at,created_at,updated_at";
+  "id,expert_profile_id,telegram_user_id,telegram_chat_id,telegram_username,first_name,last_name,source,status,current_stage,matched_offer,last_user_message,audit_request,audit_requested_at,warmth_level,gift_link_clicked_at,gift_followup_due_at,gift_followup_sent_at,created_at,updated_at";
 const MESSAGE_COLUMNS =
   "id,lead_id,expert_profile_id,direction,channel,telegram_message_id,text,message_type,created_at";
 const LIBRARY_MATERIAL_COLUMNS =
@@ -47,7 +47,7 @@ const LIBRARY_MATERIAL_COLUMNS =
 const LIBRARY_PROGRESS_COLUMNS = "id,user_id,material_id,status,created_at,updated_at";
 const USER_EVENT_COLUMNS = "id,user_id,event_name,material_id,category,metadata,created_at";
 const USER_LIBRARY_PROFILE_COLUMNS =
-  "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at";
+  "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at,journey_goal,recommended_material_ids,active_days,last_active_date,reminders_enabled";
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -108,13 +108,12 @@ async function selectRows<T>(resource: string, query: Record<string, QueryValue>
   return (await supabaseRequest<T[]>(resource, query)).data;
 }
 
-async function selectAllRows<T>(resource: string, query: Record<string, QueryValue>) {
+async function* selectPages<T>(resource: string, query: Record<string, QueryValue>) {
   const pageSize = 1_000;
-  const rows: T[] = [];
   for (let offset = 0; ; offset += pageSize) {
     const page = await selectRows<T>(resource, { ...query, limit: pageSize, offset });
-    rows.push(...page);
-    if (page.length < pageSize) return rows;
+    yield page;
+    if (page.length < pageSize) return;
   }
 }
 
@@ -164,6 +163,8 @@ function leadPayload(input: LeadUpsertInput) {
     matched_offer: input.matchedOffer,
     last_user_message: input.lastUserMessage,
     warmth_level: input.warmthLevel,
+    audit_request: input.auditRequest,
+    audit_requested_at: input.auditRequestedAt,
     ...(input.giftLinkClickedAt === undefined ? {} : { gift_link_clicked_at: input.giftLinkClickedAt }),
     ...(input.giftFollowupDueAt === undefined ? {} : { gift_followup_due_at: input.giftFollowupDueAt }),
     ...(input.giftFollowupSentAt === undefined ? {} : { gift_followup_sent_at: input.giftFollowupSentAt }),
@@ -185,6 +186,8 @@ function leadPatch(input: Partial<LeadUpsertInput>) {
       matched_offer: input.matchedOffer,
       last_user_message: input.lastUserMessage,
       warmth_level: input.warmthLevel,
+      audit_request: input.auditRequest,
+      audit_requested_at: input.auditRequestedAt,
       gift_link_clicked_at: input.giftLinkClickedAt,
       gift_followup_due_at: input.giftFollowupDueAt,
       gift_followup_sent_at: input.giftFollowupSentAt,
@@ -223,6 +226,9 @@ function userLibraryProfilePayload(input: UserLibraryProfilePatch) {
       last_interaction_at: input.last_interaction_at,
       last_followup_sent_at: input.last_followup_sent_at,
       next_followup_due_at: input.next_followup_due_at,
+      journey_goal: input.journey_goal,
+      recommended_material_ids: input.recommended_material_ids,
+      reminders_enabled: input.reminders_enabled,
     }).filter(([, value]) => value !== undefined),
   );
 }
@@ -512,19 +518,26 @@ export const supabaseStorageAdapter: StorageAdapter = {
   async getAdminAnalytics(period: AnalyticsPeriod) {
     const now = Date.now();
     const cutoff = period ? new Date(now - period * 86_400_000).toISOString() : null;
-    const [leads, events] = await Promise.all([
-      selectAllRows<AnalyticsLead>("leads", {
-        select: "id,created_at,status,current_stage,gift_link_clicked_at",
-        ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
-        order: "created_at.asc,id.asc",
-      }),
-      selectAllRows<AnalyticsEvent>("user_events", {
-        select: "user_id,event_name,category,metadata,created_at",
-        ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
-        order: "created_at.asc,id.asc",
-      }),
-    ]);
-    return buildAdminAnalytics(leads, events, period, now);
+    const accumulator = createAdminAnalyticsAccumulator(period, now);
+    for await (const page of selectPages<AnalyticsLead>("leads", {
+      select: "id,created_at,status,current_stage,gift_link_clicked_at",
+      ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
+      order: "created_at.asc,id.asc",
+    })) {
+      for (const lead of page) accumulator.addLead(lead);
+    }
+    type ProjectedEvent = Omit<AnalyticsEvent, "metadata"> & { title: unknown; question: unknown };
+    for await (const page of selectPages<ProjectedEvent>("user_events", {
+      select: "user_id,event_name,category,created_at,title:metadata->title,question:metadata->question",
+      event_name: `in.(${ADMIN_ANALYTICS_EVENT_NAMES.join(",")})`,
+      ...(cutoff ? { created_at: `gte.${cutoff}` } : {}),
+      order: "created_at.asc,id.asc",
+    })) {
+      for (const event of page) {
+        accumulator.addEvent({ ...event, metadata: { title: event.title, question: event.question } });
+      }
+    }
+    return accumulator.result();
   },
   getAdminLeads: getSupabaseAdminLeads,
   async getRecentLeadDialogues(limit = 8) {
@@ -615,13 +628,34 @@ export const supabaseStorageAdapter: StorageAdapter = {
     })).data;
   },
   async hasUserEvent(userId, eventName, category) {
-    return (
-      (await countRows("user_events", {
-        user_id: `eq.${userId}`,
-        event_name: `eq.${eventName}`,
-        ...(category === undefined ? {} : { category: category === null ? "is.null" : `eq.${category}` }),
-      })) > 0
-    );
+    return Boolean(await selectOne<{ id: string }>("user_events", {
+      select: "id",
+      user_id: `eq.${userId}`,
+      event_name: `eq.${eventName}`,
+      ...(category === undefined ? {} : { category: category === null ? "is.null" : `eq.${category}` }),
+    }));
+  },
+  async recordUserActivity(userId) {
+    await supabaseRequest("rpc/record_user_activity", {}, { method: "POST", body: { p_user_id: userId } });
+  },
+  async completeLibraryMaterial(userId, materialId) {
+    await supabaseRequest("rpc/complete_library_material", {}, { method: "POST", body: { p_user_id: userId, p_material_id: materialId } });
+  },
+  async grantUserReward(userId, key, metadata) {
+    return (await supabaseRequest<boolean>("rpc/grant_user_reward", {}, {
+      method: "POST", body: { p_user_id: userId, p_key: key, p_metadata: metadata },
+    })).data;
+  },
+  getUserRewards(userId) {
+    return selectRows<UserEventRow>("user_events", {
+      select: USER_EVENT_COLUMNS, user_id: `eq.${userId}`, event_name: "eq.reward_unlocked",
+      order: "created_at.asc", limit: 100,
+    });
+  },
+  async claimLibraryFollowup(userId, dueAt, nowIso, lastInteractionAt) {
+    return (await supabaseRequest<boolean>("rpc/claim_library_followup", {}, {
+      method: "POST", body: { p_user_id: userId, p_due_at: dueAt, p_now: nowIso, p_last_interaction_at: lastInteractionAt },
+    })).data;
   },
   getRecentUserEvents(userId, limit = 100) {
     return selectRows<UserEventRow>("user_events", {

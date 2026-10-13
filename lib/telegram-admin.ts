@@ -144,6 +144,8 @@ async function exportLeads(chatId: number) {
     "matched_offer",
     "messages",
     "last_message",
+    "audit_request",
+    "audit_requested_at",
     "created_at",
     "updated_at",
   ];
@@ -159,6 +161,8 @@ async function exportLeads(chatId: number) {
       lead.matched_offer,
       lead.messageCount,
       lead.last_user_message,
+      lead.audit_request,
+      lead.audit_requested_at,
       lead.created_at,
       lead.updated_at,
     ]
@@ -205,7 +209,7 @@ async function showDialogue(chatId: number, leadId: string) {
   });
   await sendTextMessage(
     chatId,
-    [`**${leadLabel(lead)}**`, `Статус: ${lead.status} · ${lead.current_stage}`, "", ...lines].join("\n\n"),
+    [`**${leadLabel(lead)}**`, `Статус: ${lead.status} · ${lead.current_stage}`, lead.audit_request ? `Запрос на аудит: ${lead.audit_request.slice(0, 900)}` : "", ...lines].join("\n\n"),
     { inline_keyboard: [[{ text: "← Диалоги", callback_data: "admin:dialogs" }]] },
   );
 }

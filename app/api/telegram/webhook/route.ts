@@ -10,6 +10,7 @@ import {
   getRecentMessagesByLeadId,
   getRuntimeSettings,
   insertMessage,
+  recordUserActivity,
   updateLeadMaterialById,
   updateLeadById,
   type ExpertFaqRow,
@@ -24,9 +25,10 @@ import { handleLibraryContextMessage, handleLibraryTelegramAction } from "@/lib/
 import { BALL_SPIN_ACTION } from "@/lib/prediction-ball";
 import { trackUserEvent } from "@/lib/tracking/events";
 import { buildNeiroPrompt } from "@/lib/neiroclozer/prompt-builder";
-import { generateNeiroReply } from "@/lib/neiroclozer/generate-reply";
+import { generateNeiroReply, summarizeAiFailure } from "@/lib/neiroclozer/generate-reply";
+import { beginAuditRequest, handleAuditMessage } from "@/lib/neiroclozer/audit";
+import { getCalendarLink, getPublicBaseUrl } from "@/lib/public-links";
 import {
-  AFTER_HANDOFF_TEXT,
   AUDIT_DECLINE_TEXT,
   AUDIT_EXPLANATION_TEXT,
   MATERIAL_LIMIT_TEXT,
@@ -45,7 +47,6 @@ import {
   isPostQuizStage,
 } from "@/lib/neiroclozer/materials-analysis";
 import {
-  buildInvalidMarketingRoiQuizAnswerText,
   buildMarketingRoiQuizVerdict,
   getMarketingRoiQuizKeyboard,
   getMarketingRoiQuizQuestion,
@@ -75,38 +76,13 @@ const GIFT_FOLLOWUP_DELAY_MS = 15 * 60 * 1000;
 const BARE_URL_CLARIFICATION_TEXT =
   "Ссылку получил. Что хочешь с ней сделать — посмотреть, разобрать или использовать как контекст?";
 function isStartCommand(text: string) {
-  return text.trim().toLowerCase() === "/start";
-}
-
-function getPublicBaseUrl(request: Request) {
-  const envBaseUrl =
-    process.env.TELEGRAM_WEBHOOK_BASE_URL ||
-    process.env.PUBLIC_BASE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL;
-
-  if (envBaseUrl) {
-    return envBaseUrl.replace(/\/+$/, "");
-  }
-
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-
-  if (forwardedHost && forwardedProto) {
-    return `${forwardedProto}://${forwardedHost}`.replace(/\/+$/, "");
-  }
-
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`.replace(/\/+$/, "");
+  return /^\/start(?:@[a-z0-9_]+)?$/i.test(text.trim());
 }
 
 function buildTrackedGiftUrl(request: Request, leadId: string, giftUrl: string) {
   const trackedUrl = new URL(`${getPublicBaseUrl(request)}/api/gift/${leadId}`);
   trackedUrl.searchParams.set("redirect", giftUrl);
   return trackedUrl.toString();
-}
-
-function getCalendarLink() {
-  return process.env.CALENDAR_LINK || "https://calendar.app.google/rpFMG61ce4dXL54z5";
 }
 
 function buildAuditBookingText() {
@@ -132,22 +108,6 @@ function buildAuditBookingMarkup() {
       ],
     ],
   };
-}
-
-function getBookedStage(matchedOffer: string | null, currentStage: string) {
-  if (currentStage === "awaiting_expert_call") {
-    return "expert_call_confirmed";
-  }
-
-  if (matchedOffer === "consulting") {
-    return "consulting_booked";
-  }
-
-  if (matchedOffer === "done_for_you") {
-    return "done_for_you_booked";
-  }
-
-  return "diagnostic_booked";
 }
 
 async function sendMarketingRoiQuizQuestion(chatId: number, leadId: string, expertProfileId: string, stage: string) {
@@ -248,6 +208,9 @@ async function sendAndStoreKnowledgeReply(params: {
   faq: ExpertFaqRow[];
   objections: ExpertObjectionRow[];
   messages: MessageRow[];
+  replyMarkup?: Parameters<typeof sendTextMessage>[2];
+  context?: string;
+  preserveStage?: boolean;
 }) {
   const prompt = buildNeiroPrompt({
     expert: params.expertProfile,
@@ -258,8 +221,14 @@ async function sendAndStoreKnowledgeReply(params: {
     messages: params.messages,
   });
 
-  const reply = await generateNeiroReply(prompt);
-  const results = await sendTextMessages(params.chatId, reply);
+  let reply: string;
+  try {
+    reply = await generateNeiroReply([prompt, params.context].filter(Boolean).join("\n"));
+  } catch (error) {
+    console.error("AI dialogue unavailable:", summarizeAiFailure(error));
+    reply = "Сейчас не получилось подготовить ответ. Попробуй написать чуть позже. Библиотека через /start и запись по слову «аудит» доступны.";
+  }
+  const results = await sendTextMessages(params.chatId, reply, params.replyMarkup);
 
   for (const result of results) {
     await insertMessage({
@@ -273,9 +242,10 @@ async function sendAndStoreKnowledgeReply(params: {
     });
   }
 
-  if (reply.includes(getCalendarLink())) {
+  if (!params.preserveStage && reply.includes(getCalendarLink()) && !/(booked|confirmed)/.test(params.lead.current_stage)) {
     await updateLeadById(params.lead.id, {
-      currentStage: getBookedStage(params.lead.matched_offer, params.lead.current_stage),
+      currentStage: "handoff",
+      status: "needs_manual_followup",
     });
   }
 
@@ -394,9 +364,7 @@ function hasBookedSignal(text: string) {
 }
 
 function isBookingLinkRequest(text: string) {
-  return hasAnyKeyword(text, [
-    "ссылка",
-    "ссылку",
+  return hasAnyKeyword(text.toLowerCase(), [
     "запись",
     "записаться",
     "календар",
@@ -553,6 +521,11 @@ async function handlePostQuizMaterialsFlow(
   const bookingText = buildAuditBookingText();
   const bookingMarkup = buildAuditBookingMarkup();
 
+  if (intent === "audit_agree" && !lead.audit_request) {
+    await beginAuditRequest(incomingMessage, lead);
+    return;
+  }
+
   if (isBookingLinkRequest(incomingMessage.text)) {
     await sendAndStorePlainTextWithMarkup(
       incomingMessage.telegramChatId,
@@ -591,7 +564,15 @@ async function handlePostQuizMaterialsFlow(
   }
 
   if (currentStage === POST_QUIZ_STAGES.handoff) {
-    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AFTER_HANDOFF_TEXT);
+    await sendAndStoreKnowledgeReply({
+      chatId: incomingMessage.telegramChatId,
+      lead,
+      expertProfile,
+      offers,
+      faq,
+      objections,
+      messages,
+    });
     return;
   }
 
@@ -693,11 +674,17 @@ async function handlePostQuizMaterialsFlow(
         warmthLevel: "warm",
       });
 
-      const analysis = await buildMaterialAnalysis({
-        lead,
-        materialText: material.rawText,
-        materialType: material.materialType,
-      });
+      let analysis: string;
+      try {
+        analysis = await buildMaterialAnalysis({ lead, materialText: material.rawText, materialType: material.materialType });
+      } catch (error) {
+        console.error("Material analysis unavailable:", summarizeAiFailure(error));
+        await updateLeadMaterialById(savedMaterial.id, { status: "failed" });
+        await updateLeadById(lead.id, { currentStage: POST_QUIZ_STAGES.auditOffered });
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id,
+          "Материал сохранён, но сейчас не получилось подготовить разбор. Можно обсудить задачу с Александром: напиши «аудит», и я помогу с записью.");
+        return;
+      }
 
       await updateLeadMaterialById(savedMaterial.id, {
         analysis,
@@ -741,12 +728,7 @@ async function handlePostQuizMaterialsFlow(
       return;
     }
 
-    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
-    await updateLeadById(lead.id, {
-      currentStage: POST_QUIZ_STAGES.auditOffered,
-      matchedOffer: "diagnostic",
-      warmthLevel: "warm",
-    });
+    await sendAndStoreKnowledgeReply({ chatId: incomingMessage.telegramChatId, lead, expertProfile, offers, faq, objections, messages });
     return;
   }
 
@@ -865,11 +847,17 @@ async function handlePostQuizMaterialsFlow(
         warmthLevel: "warm",
       });
 
-      const analysis = await buildMaterialAnalysis({
-        lead,
-        materialText: material.rawText,
-        materialType: material.materialType,
-      });
+      let analysis: string;
+      try {
+        analysis = await buildMaterialAnalysis({ lead, materialText: material.rawText, materialType: material.materialType });
+      } catch (error) {
+        console.error("Material analysis unavailable:", summarizeAiFailure(error));
+        await updateLeadMaterialById(savedMaterial.id, { status: "failed" });
+        await updateLeadById(lead.id, { currentStage: POST_QUIZ_STAGES.auditOffered });
+        await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id,
+          "Материал сохранён, но сейчас не получилось подготовить разбор. Можно обсудить задачу с Александром: напиши «аудит», и я помогу с записью.");
+        return;
+      }
 
       await updateLeadMaterialById(savedMaterial.id, {
         analysis,
@@ -886,12 +874,7 @@ async function handlePostQuizMaterialsFlow(
       return;
     }
 
-    if (recentIncomingCount >= 12) {
-      await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, POST_QUIZ_FOLLOWUP_LIMIT_TEXT);
-      return;
-    }
-
-    await sendAndStorePlainText(incomingMessage.telegramChatId, lead.id, expertProfile.id, AUDIT_EXPLANATION_TEXT);
+    await sendAndStoreKnowledgeReply({ chatId: incomingMessage.telegramChatId, lead, expertProfile, offers, faq, objections, messages });
   }
 }
 
@@ -929,6 +912,11 @@ export async function POST(request: Request) {
     }
 
     let existingLead = await getLeadByTelegramUserId(incomingMessage.telegramUserId);
+    const auditLead = await handleAuditMessage(incomingMessage, expertProfile, existingLead);
+    if (auditLead) {
+      await recordUserActivity(auditLead.id);
+      return Response.json({ ok: true, audit: true });
+    }
     const libraryAction = await handleLibraryTelegramAction({
       message: incomingMessage,
       expertProfile,
@@ -1035,6 +1023,8 @@ export async function POST(request: Request) {
         warmthLevel,
       })) ?? lead;
 
+    await recordUserActivity(lead.id);
+
     await insertMessage({
       leadId: lead.id,
       expertProfileId: expertProfile.id,
@@ -1120,21 +1110,15 @@ export async function POST(request: Request) {
       const answer = parseMarketingRoiQuizAnswer(incomingMessage.text);
 
       if (!answer) {
-        const invalidAnswerText = buildInvalidMarketingRoiQuizAnswerText(updatedLead.current_stage);
-        const invalidAnswerResult = await sendTextMessage(
-          incomingMessage.telegramChatId,
-          invalidAnswerText,
-          getMarketingRoiQuizKeyboard(updatedLead.current_stage),
-        );
-
-        await insertMessage({
-          leadId: lead.id,
-          expertProfileId: expertProfile.id,
-          direction: "outgoing",
-          channel: "telegram",
-          telegramMessageId: invalidAnswerResult.telegramMessageId,
-          text: invalidAnswerText,
-          messageType: "qual_question",
+        const [offers, faq, objections, messages] = await Promise.all([
+          getActiveExpertOffers(expertProfile.id), getActiveExpertFaq(expertProfile.id),
+          getActiveExpertObjections(expertProfile.id), getRecentMessagesByLeadId(lead.id, 12),
+        ]);
+        await sendAndStoreKnowledgeReply({ chatId: incomingMessage.telegramChatId, lead: updatedLead,
+          expertProfile, offers, faq, objections, messages,
+          replyMarkup: getMarketingRoiQuizKeyboard(updatedLead.current_stage),
+          preserveStage: true,
+          context: `Current quiz question (keep pending, do not infer an answer): ${getMarketingRoiQuizQuestion(updatedLead.current_stage)?.text}. Reply to the user's actual message in Russian. The existing answer buttons allow returning to the quiz.`,
         });
 
         return Response.json({ ok: true });

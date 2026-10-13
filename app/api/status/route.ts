@@ -1,11 +1,13 @@
 import { getLocalStoreSummary } from "@/lib/storage";
 import { isLibraryEnabled, isLibraryLinkSecretConfigured } from "@/lib/library/config";
+import { getAiStatus } from "@/lib/neiroclozer/ai-config";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
     const store = await getLocalStoreSummary();
+    const ai = getAiStatus();
 
     return Response.json({
       ok: true,
@@ -24,9 +26,10 @@ export async function GET() {
       integrations: {
         telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
         telegramAdmin: Boolean(process.env.TELEGRAM_ADMIN_USER_ID),
-        ai: Boolean(process.env.ANTHROPIC_API_KEY),
+        ai: ai.configured,
         cron: Boolean(process.env.CRON_SECRET),
       },
+      ai,
       library: {
         enabled: isLibraryEnabled(),
         linkSecretConfigured: isLibraryLinkSecretConfigured(),

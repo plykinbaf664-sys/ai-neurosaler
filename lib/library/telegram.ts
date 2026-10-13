@@ -3,6 +3,8 @@ import "server-only";
 import {
   createLead,
   insertMessage,
+  recordUserActivity,
+  upsertUserLibraryProfile,
   updateLeadById,
   type ExpertProfileRow,
   type LeadRow,
@@ -10,14 +12,14 @@ import {
 } from "@/lib/storage";
 import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibraryEnabled } from "@/lib/library/config";
 import { getMaterialById } from "@/lib/library/materials";
-import { getCategoryProgress, markMaterialCompleted, markMaterialOpened } from "@/lib/library/progress";
+import { getCategoryProgress, markMaterialCompleted, markMaterialOpened, type CategoryProgress } from "@/lib/library/progress";
 import {
   buildContextualLibraryReply,
   getNextMaterialAfter,
   getNextRecommendedMaterial,
 } from "@/lib/library/recommendations";
 import { unlockCategoryReward } from "@/lib/library/rewards";
-import { cancelLibraryFollowup, scheduleRequestedLibraryReminder } from "@/lib/library/followups";
+import { cancelLibraryFollowup, scheduleRequestedLibraryReminder, scheduleNextStepFollowup } from "@/lib/library/followups";
 import {
   getLibraryUserProfile,
   refreshLibraryUserProfile,
@@ -28,6 +30,7 @@ import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram
 import { trackUserEvent } from "@/lib/tracking/events";
 import { createLibraryToken } from "@/lib/security/library-token";
 import { BALL_OPEN_ACTION, handlePredictionBall, isPredictionBallAction } from "@/lib/prediction-ball";
+import { getMiniAppUrl } from "@/lib/public-links";
 
 const MAIN_MENU_ACTION = "nav:menu";
 const MARKETING_ACTION = "nav:marketing";
@@ -45,13 +48,15 @@ type LibraryTelegramResult = {
   lead?: LeadRow;
 };
 
-function mainMenuMarkup() {
+function mainMenuMarkup(baseUrl: string) {
+  const miniAppUrl = getMiniAppUrl(baseUrl);
   return {
     inline_keyboard: [
       [{ text: "📊 Разобрать маркетинг", callback_data: MARKETING_ACTION }],
       ...LIBRARY_CATEGORIES.map((category) => [
         { text: category.buttonLabel, callback_data: `${CATEGORY_PREFIX}${category.slug}` },
       ]),
+      ...(miniAppUrl ? [[{ text: "✨ Мой маршрут и награды", web_app: { url: miniAppUrl } }]] : []),
     ],
   };
 }
@@ -79,6 +84,7 @@ async function ensureLibraryLead(
   existingLead: LeadRow | null,
 ) {
   if (existingLead) {
+    await recordUserActivity(existingLead.id);
     return (
       (await updateLeadById(existingLead.id, {
         telegramChatId: message.telegramChatId,
@@ -90,7 +96,7 @@ async function ensureLibraryLead(
     );
   }
 
-  return createLead({
+  const lead = await createLead({
     expertProfileId: expertProfile.id,
     telegramUserId: message.telegramUserId,
     telegramChatId: message.telegramChatId,
@@ -107,6 +113,8 @@ async function ensureLibraryLead(
     giftFollowupDueAt: null,
     giftFollowupSentAt: null,
   });
+  await recordUserActivity(lead.id);
+  return lead;
 }
 
 async function storeIncoming(message: TelegramPrivateTextMessage, lead: LeadRow, expertProfileId: string) {
@@ -140,7 +148,7 @@ async function sendAndStore(
   });
 }
 
-async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, expertProfileId: string) {
+async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, expertProfileId: string, baseUrl: string) {
   await sendAndStore(
     message.telegramChatId,
     lead,
@@ -150,9 +158,9 @@ async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, 
       "",
       "Наша задача — помочь тебе не просто попробовать AI, а найти, где он реально улучшит жизнь, работу или бизнес: сэкономит время, уберёт рутину и покажет новые точки роста.",
       "",
-      "Выбери, с чего начнём:",
+      "Напиши своими словами, что хочешь улучшить — подберу, с чего начать. Или выбери направление:",
     ].join("\n"),
-    mainMenuMarkup(),
+    mainMenuMarkup(baseUrl),
   );
 }
 
@@ -167,8 +175,9 @@ async function showAllMaterials(
   lead: LeadRow,
   expertProfileId: string,
   category: string,
+  currentProgress?: CategoryProgress,
 ) {
-  const progress = await getCategoryProgress(lead.id, category);
+  const progress = currentProgress ?? await getCategoryProgress(lead.id, category);
 
   if (!progress.total) {
     await sendAndStore(
@@ -207,7 +216,7 @@ async function showMaterial(
   material: LibraryMaterialRow,
   publicBaseUrl: string,
 ) {
-  await markMaterialOpened(lead.id, material);
+  await markMaterialOpened(lead.id, material, { refreshProfile: false });
   const progress = await getCategoryProgress(lead.id, material.category);
   await trackUserEvent({
     userId: lead.id,
@@ -263,7 +272,7 @@ export async function handleLibraryTelegramAction(input: {
   if (!isLibraryEnabled()) return { handled: false, startMarketing: false };
 
   const { message, expertProfile } = input;
-  const isStart = message.text.trim().toLowerCase() === "/start";
+  const isStart = /^\/start(?:@[a-z0-9_]+)?$/i.test(message.text.trim());
   const isLibraryAction =
     message.text === MAIN_MENU_ACTION ||
     message.text === MARKETING_ACTION ||
@@ -273,10 +282,24 @@ export async function handleLibraryTelegramAction(input: {
     message.text.startsWith(MATERIAL_PREFIX) ||
     message.text.startsWith(COMPLETE_PREFIX) ||
     message.text.startsWith(NEXT_PREFIX);
+  const reminderAction = message.callbackQueryId && ["lib:reminders:off", "lib:reminders:on"].includes(message.text);
 
-  if (!isStart && !isLibraryAction) return { handled: false, startMarketing: false };
+  if (!isStart && !isLibraryAction && !reminderAction) return { handled: false, startMarketing: false };
 
   const lead = await ensureLibraryLead(message, expertProfile, input.existingLead);
+  if (lead.current_stage === "audit_request_requested" && (isStart || message.text === MAIN_MENU_ACTION || message.text.startsWith(CATEGORY_PREFIX))) {
+    await updateLeadById(lead.id, { currentStage: "ecosystem_menu" });
+  }
+
+  if (reminderAction) {
+    const enabled = message.text.endsWith(":on");
+    await upsertUserLibraryProfile(lead.id, { reminders_enabled: enabled, next_followup_due_at: null });
+    if (enabled) await scheduleNextStepFollowup(lead.id);
+    await sendAndStore(message.telegramChatId, lead, expertProfile.id, enabled ? "Напоминания включены." : "Напоминания выключены. Продолжить можно в любой момент через /start.", {
+      inline_keyboard: [[{ text: enabled ? "Выключить напоминания" : "Включить напоминания", callback_data: enabled ? "lib:reminders:off" : "lib:reminders:on" }]],
+    });
+    return { handled: true, startMarketing: false, lead };
+  }
 
   if (message.text === MARKETING_ACTION) {
     await setConversationRoute(lead.id, "marketing");
@@ -292,7 +315,7 @@ export async function handleLibraryTelegramAction(input: {
       eventName: message.text === MAIN_MENU_ACTION ? "library_returned" : "library_opened",
       metadata: { source: "telegram" },
     });
-    await showMainMenu(message, lead, expertProfile.id);
+    await showMainMenu(message, lead, expertProfile.id, input.publicBaseUrl);
     return { handled: true, startMarketing: false, lead };
   }
 
@@ -308,6 +331,7 @@ export async function handleLibraryTelegramAction(input: {
       metadata: { route: category },
     });
     await refreshLibraryUserProfile(lead.id);
+    await scheduleNextStepFollowup(lead.id);
 
     if (progress.completed > 0 || progress.opened > 0) {
       await sendAndStore(
@@ -318,7 +342,7 @@ export async function handleLibraryTelegramAction(input: {
         categoryNavigationMarkup(category),
       );
     } else {
-      await showAllMaterials(message, lead, expertProfile.id, category);
+      await showAllMaterials(message, lead, expertProfile.id, category, progress);
     }
     return { handled: true, startMarketing: false, lead };
   }
@@ -352,7 +376,7 @@ export async function handleLibraryTelegramAction(input: {
     if (material?.is_active) {
       const progress = await markMaterialCompleted(lead.id, material);
       const rewardUnlocked = await unlockCategoryReward(lead.id, progress);
-      const nextMaterial = await getNextMaterialAfter(lead.id, material);
+      const nextMaterial = await getNextMaterialAfter(lead.id, material, progress);
       const buttons = [];
       if (nextMaterial) {
         buttons.push([
@@ -426,27 +450,17 @@ export async function handleLibraryContextMessage(input: {
   existingLead: LeadRow | null;
   marketingFlowActive: boolean;
 }) {
-  if (!isLibraryEnabled() || !input.existingLead || input.message.callbackQueryId) return false;
+  if (!isLibraryEnabled() || input.message.callbackQueryId || input.message.text.startsWith("/")) return false;
 
-  const profile = await getLibraryUserProfile(input.existingLead.id);
+  const profile = input.existingLead ? await getLibraryUserProfile(input.existingLead.id) : null;
   if (input.marketingFlowActive && profile?.last_route !== "life" && profile?.last_route !== "business") {
     return false;
   }
 
-  const reply = await buildContextualLibraryReply(input.existingLead.id, input.message.text);
-  if (!reply) return false;
-
-  const lead =
-    (await updateLeadById(input.existingLead.id, {
-      telegramChatId: input.message.telegramChatId,
-      telegramUsername: input.message.telegramUsername,
-      firstName: input.message.firstName,
-      lastName: input.message.lastName,
-      lastUserMessage: input.message.text,
-    })) ?? input.existingLead;
-
+  const lead = await ensureLibraryLead(input.message, input.expertProfile, input.existingLead);
   await storeIncoming(input.message, lead, input.expertProfile.id);
-  await rememberLibraryUserMessage(lead.id, reply.route, input.message.text);
+  const reply = await buildContextualLibraryReply(lead.id, input.message.text);
+  if (reply.route) await rememberLibraryUserMessage(lead.id, reply.route, input.message.text);
   const reminderScheduled = reply.reminderRequested
     ? await scheduleRequestedLibraryReminder(lead.id)
     : false;
@@ -456,11 +470,11 @@ export async function handleLibraryContextMessage(input: {
       : reply.text;
 
   const buttons = [];
-  if (reply.suggestedMaterial) {
+  for (const [index, material] of reply.suggestedMaterials.entries()) {
     buttons.push([
       {
-        text: `Открыть: ${reply.suggestedMaterial.title}`.slice(0, 60),
-        callback_data: `${MATERIAL_PREFIX}${reply.suggestedMaterial.id}`,
+        text: `${index + 1}. ${material.title}`.slice(0, 60),
+        callback_data: `${MATERIAL_PREFIX}${material.id}`,
       },
     ]);
   }
@@ -468,5 +482,6 @@ export async function handleLibraryContextMessage(input: {
   await sendAndStore(input.message.telegramChatId, lead, input.expertProfile.id, responseText, {
     inline_keyboard: buttons,
   });
+  if (!reply.reminderRequested) await scheduleNextStepFollowup(lead.id);
   return true;
 }

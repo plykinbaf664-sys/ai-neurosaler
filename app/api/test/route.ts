@@ -46,7 +46,5 @@ export async function GET(request: Request) {
   });
   const reply = await generateNeiroReply(prompt);
 
-  console.log(reply);
-
   return Response.json({ ok: true, reply });
 }

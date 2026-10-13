@@ -11,6 +11,8 @@ export type LeadRow = {
   current_stage: string;
   matched_offer: string | null;
   last_user_message: string | null;
+  audit_request?: string | null;
+  audit_requested_at?: string | null;
   warmth_level: string;
   gift_link_clicked_at: string | null;
   gift_followup_due_at: string | null;
@@ -117,6 +119,8 @@ export type LeadUpsertInput = {
   matchedOffer: string | null;
   lastUserMessage: string | null;
   warmthLevel: string;
+  auditRequest?: string | null;
+  auditRequestedAt?: string | null;
   giftLinkClickedAt?: string | null;
   giftFollowupDueAt?: string | null;
   giftFollowupSentAt?: string | null;
@@ -206,6 +210,10 @@ export type LibraryProgressRow = {
 };
 
 export type UserEventName =
+  | "audit_requested"
+  | "audit_request_saved"
+  | "calendar_link_sent"
+  | "journey_updated"
   | "prediction_ball_opened"
   | "prediction_ball_spun"
   | "library_opened"
@@ -254,6 +262,11 @@ export type UserLibraryProfileRow = {
   last_followup_sent_at: string | null;
   next_followup_due_at: string | null;
   updated_at: string;
+  journey_goal?: string | null;
+  recommended_material_ids?: string[];
+  active_days?: number;
+  last_active_date?: string | null;
+  reminders_enabled?: boolean;
 };
 
 export type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
@@ -303,6 +316,11 @@ export interface StorageAdapter {
   ): Promise<LibraryProgressRow>;
   insertUserEvent(input: UserEventInsertInput): Promise<StoredRowRef>;
   claimPredictionBallSpin(userId: string, result: string): Promise<boolean>;
+  completeLibraryMaterial(userId: string, materialId: string): Promise<void>;
+  recordUserActivity(userId: string): Promise<void>;
+  grantUserReward(userId: string, key: string, metadata: Record<string, unknown>): Promise<boolean>;
+  getUserRewards(userId: string): Promise<UserEventRow[]>;
+  claimLibraryFollowup(userId: string, dueAt: string, nowIso: string, lastInteractionAt: string): Promise<boolean>;
   hasUserEvent(userId: string, eventName: UserEventName, category?: string | null): Promise<boolean>;
   getRecentUserEvents(userId: string, limit?: number): Promise<UserEventRow[]>;
   getUserLibraryProfile(userId: string): Promise<UserLibraryProfileRow | null>;

@@ -103,7 +103,10 @@ Required for the Telegram flow:
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ADMIN_USER_ID=
 TELEGRAM_WEBHOOK_SECRET=
-ANTHROPIC_API_KEY=
+AI_PROVIDER=qwen
+QWEN_API_KEY=
+QWEN_BASE_URL=
+QWEN_MODEL=qwen-plus
 CRON_SECRET=
 ```
 
@@ -113,13 +116,20 @@ Recommended:
 TELEGRAM_WEBHOOK_BASE_URL=https://your-public-host.example
 PUBLIC_BASE_URL=https://your-public-host.example
 NEXT_PUBLIC_APP_URL=https://your-public-host.example
-ANTHROPIC_MODEL=
 CALENDAR_LINK=
 NEIRO_GIFT_URL=
 NEIRO_ENTRY_FLOW_MODE=quiz
 ```
 
 The default entry flow is the three-step marketing ROI quiz. Set `NEIRO_ENTRY_FLOW_MODE=gift` to use the legacy gift flow.
+
+For Qwen, fill in the API key and OpenAI-compatible URL from the same provider region/workspace.
+See [Qwen setup (Russian)](docs/qwen-setup.md) for the exact fields, server configuration and checks.
+`npm run ai:check` validates settings without a request; `npm run ai:check -- --live` makes one
+small API call. All AI flows use the selected provider. Qwen uses non-thinking chat mode and JSON
+output for personal tracks; choose a model that supports both (default `qwen-plus`).
+Set `AI_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` / optional `ANTHROPIC_MODEL` to keep Anthropic.
+Existing installations without `AI_PROVIDER` retain Anthropic. There is no automatic fallback.
 
 `NEIRO_GIFT_URL` overrides the seed profile's `gift_url` at runtime. Set it before a client-facing demo; the committed seed intentionally contains a placeholder URL.
 
@@ -193,4 +203,51 @@ marketing quiz, AI dialogue and handoff. Tests use isolated in-memory data and m
 
 The migrations under `supabase/sql` are additive and provide the tables expected by the Supabase adapter. The service-role key is read only by the server-side storage layer.
 
-See `docs/storage-audit.md` for the dependency audit, entity mapping and operational limitations.
+## Dialogue, audit intake and personal journey
+
+Apply `supabase/sql/014_journey_and_audit.sql` **before deploying this version**. It extends
+existing `leads` and `user_library_profiles` and adds server-only RPCs; there are no new tables.
+It is repeatable. Existing rows, material URLs, stages and progress are retained.
+
+- `аудит` starts intake from any conversation. The bot asks for a free-form request, stores it in
+  `leads.audit_request` / `audit_requested_at`, then sends `CALENDAR_LINK`. Sending a calendar link
+  records handoff, not a confirmed booking. The request is visible in the Telegram admin dialogue
+  and CSV even after older messages are pruned. No Calendar API booking synchronization is claimed.
+- Library dialogue uses the configured Qwen or Anthropic provider and bounded recent history. One call
+  returns a conversational reply and up to three validated active material IDs. The compact
+  goal/track snapshot is stored in the existing user profile; completion remains a button action.
+- `/journey` is the Telegram Mini App launched by the main menu's “Мой маршрут и награды” button.
+  Configure the existing public base URL as an HTTPS host. The API checks HMAC-signed Telegram
+  initData and its age (one hour); it never trusts a client-provided user ID. No new account is needed.
+- Awards reuse `user_events`. Granting an award and material completion are atomic and repeatable.
+  Active use counts distinct UTC days using two profile fields, starting when tracking is deployed.
+  There are no timers, heartbeat logs or full activity histories; prediction ball spins are not
+  material completions. Awards already earned are retained if the catalogue changes.
+- Enable `LIBRARY_FOLLOWUPS_ENABLED=true` to activate the existing cron. It sends one next-step
+  recommendation after inactivity, then waits for another interaction before scheduling another.
+  The default delay is 24 hours, minimum inactivity is 12 hours, and frequency is at most once per
+  24 hours. Users can opt out in the Mini App or the message button. A DB claim prevents concurrent
+  sends. An uncertain/failed delivery is not immediately retried. Existing Vercel cron runs daily,
+  so delivery may be later than the configured threshold. `CRON_SECRET` remains required.
+
+Verification:
+
+```powershell
+node --test tests/*.test.mjs
+npm.cmd run lint
+npm.cmd run build
+# Read-only checks of actual public destinations; no tracked user URLs or real bot messages.
+node --env-file=.env.local scripts/check-public-links.mjs --live
+```
+
+Optional isolated checks use PGlite and Playwright installed outside the project:
+`scripts/verify-journey-migration.mjs` accepts `PGLITE_MODULE` (path to its JS entry point), and
+`scripts/preview-journey.mjs` accepts `PLAYWRIGHT_MODULE` plus `PREVIEW_URL` (defaults to
+`http://localhost:3017/journey`). They use a fresh in-memory DB and synthetic browser data.
+The preview writes screenshots to `.agent/artifacts/`.
+
+AI provider failures are logged as a short reason/status/request ID, without the raw provider
+response or user prompt. Dialogue responds with a temporary-unavailability notice; audit intake
+still accepts and stores the request and sends the calendar. Failed material analysis retains
+the submission without marking it analyzed. If logs show `insufficient_credits`, replenish the
+configured provider account: application changes alone cannot restore AI replies.

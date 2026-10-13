@@ -143,6 +143,26 @@ export function claimPredictionBallSpin(userId: string, result: string) {
   return getStorageAdapter().claimPredictionBallSpin(userId, result);
 }
 
+export function completeLibraryMaterial(userId: string, materialId: string) {
+  return getStorageAdapter().completeLibraryMaterial(userId, materialId);
+}
+
+export function recordUserActivity(userId: string) {
+  return getStorageAdapter().recordUserActivity(userId);
+}
+
+export function grantUserReward(userId: string, key: string, metadata: Record<string, unknown> = {}) {
+  return getStorageAdapter().grantUserReward(userId, key, metadata);
+}
+
+export function getUserRewards(userId: string) {
+  return getStorageAdapter().getUserRewards(userId);
+}
+
+export function claimLibraryFollowup(userId: string, dueAt: string, nowIso: string, lastInteractionAt: string) {
+  return getStorageAdapter().claimLibraryFollowup(userId, dueAt, nowIso, lastInteractionAt);
+}
+
 export function hasUserEvent(
   userId: string,
   eventName: import("@/lib/storage/types").UserEventName,

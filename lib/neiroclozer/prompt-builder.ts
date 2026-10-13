@@ -6,6 +6,7 @@ import type {
   LeadRow,
   MessageRow,
 } from "@/lib/storage";
+import { getCalendarLink } from "@/lib/public-links";
 
 type BuildNeiroPromptParams = {
   expert: ExpertProfileRow;
@@ -19,9 +20,6 @@ type BuildNeiroPromptParams = {
 const MAX_SECTION_LENGTH = 320;
 const MAX_MESSAGE_LENGTH = 260;
 const MAX_ITEMS_PER_SECTION = 3;
-function getCalendarLink() {
-  return process.env.CALENDAR_LINK || "https://calendar.app.google/rpFMG61ce4dXL54z5";
-}
 
 function valueOrFallback(value: string | null | undefined, fallback = "Не указано") {
   return value?.trim() || fallback;
@@ -107,6 +105,9 @@ export function buildNeiroPrompt(params: BuildNeiroPromptParams) {
 
   return [
     ...neuroauditLeadRules,
+    "DIALOGUE: сначала ответь на последнее сообщение естественно и по смыслу. Учитывай предыдущие реплики, не повторяй предыдущий ответ. Приветствие, эмоция или шутка не требуют продажи.",
+    "После передачи запроса продолжай разговор по существу. Не отвечай одной и той же фразой про передачу Александру и не утверждай, что человек записан только потому, что отправлена ссылка.",
+    `AUDIT_REQUEST: ${lead.audit_request ? truncateText(lead.audit_request, 800) : "не сохранён"}`,
     "ROLE: AI-ассистент отдела продаж. Ты не эксперт.",
     "VOICE: говори от лица команды. Нельзя выдавать себя за эксперта или писать, будто у тебя есть личная практика.",
     "GOAL: быстро квалифицируй и веди к одному следующему шагу.",

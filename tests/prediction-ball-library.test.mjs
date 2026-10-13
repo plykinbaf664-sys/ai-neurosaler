@@ -7,6 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 process.env.STORAGE_DRIVER = "local";
+process.env.AI_PROVIDER = "anthropic";
 process.env.LOCAL_DATA_MODE = "memory";
 process.env.LIBRARY_ENABLED = "true";
 process.env.LIBRARY_FOLLOWUPS_ENABLED = "false";
@@ -176,7 +177,8 @@ test("repeat after 24 hours generates another allowed result, including possible
 
 test("plain start, other payloads, marketing entry and old handoff state stay intact", async () => {
   await action("/start", 706);
-  assert.deepEqual(buttons().map(b => b.callback_data), ["nav:marketing", "lib:cat:life", "lib:cat:business"]);
+  assert.deepEqual(buttons().filter(b => b.callback_data).map(b => b.callback_data), ["nav:marketing", "lib:cat:life", "lib:cat:business"]);
+  assert.equal(buttons().find(b => b.web_app).web_app.url, "https://neiro.test/journey");
   for (const payload of ["ref_123", "gift", "ball_extra"]) {
     assert.equal((await action(`/start ${payload}`, 706)).handled, false);
   }
@@ -238,7 +240,7 @@ test("webhook routes ball callbacks once and preserves quiz, AI dialogue and han
   assert.equal(calls.filter(c => c.method === "answerCallbackQuery").length, 1);
   assert.equal(calls[0].text, BALL_COOLDOWN_TEXT);
   await post("/start", 711);
-  assert.deepEqual(buttons().map(b => b.callback_data), ["nav:marketing", "lib:cat:life", "lib:cat:business"]);
+  assert.deepEqual(buttons().filter(b => b.callback_data).map(b => b.callback_data), ["nav:marketing", "lib:cat:life", "lib:cat:business"]);
   await post("nav:marketing", 711, true);
   assert.ok(lastMessage().text.includes("1/3"));
   for (const answer of ["A", "B", "C"]) await post(answer, 711, true);

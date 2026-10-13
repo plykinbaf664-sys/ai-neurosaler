@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 
 import { getLocalStoreSummary } from "@/lib/storage";
+import { getAiStatus } from "@/lib/neiroclozer/ai-config";
 
 function StatusBadge({ ready, children }: { ready: boolean; children: React.ReactNode }) {
   return (
@@ -20,7 +21,8 @@ export default async function Home() {
   const store = await getLocalStoreSummary();
   const telegramReady = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const adminReady = Boolean(process.env.TELEGRAM_ADMIN_USER_ID);
-  const aiReady = Boolean(process.env.ANTHROPIC_API_KEY);
+  const ai = getAiStatus();
+  const aiReady = ai.configured;
   const systemReady = Boolean(store.expert) && store.giftReady && telegramReady && adminReady && aiReady;
 
   const stats = [
@@ -72,10 +74,10 @@ export default async function Home() {
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-slate-300">AI-ответы</p>
-              <StatusBadge ready={aiReady}>{aiReady ? "подключены" : "нужен ключ"}</StatusBadge>
+              <StatusBadge ready={aiReady}>{aiReady ? "настроены" : "нужна настройка"}</StatusBadge>
             </div>
-            <p className="mt-4 text-2xl font-semibold">Anthropic</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">Используется после квиза и для анализа материалов.</p>
+            <p className="mt-4 text-2xl font-semibold">{ai.provider === "qwen" ? "Qwen" : ai.provider === "anthropic" ? "Anthropic" : "AI"}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{ai.configured ? `${ai.model} · диалог, маршрут и анализ материалов` : ai.configurationError}</p>
           </article>
         </section>
 

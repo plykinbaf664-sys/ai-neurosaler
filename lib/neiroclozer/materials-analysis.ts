@@ -5,7 +5,7 @@ import {
 } from "@/lib/storage/limits";
 import {
   DEFAULT_MATERIAL_ANALYSIS_TOKENS,
-  generateAnthropicText,
+  generateAiText,
 } from "@/lib/neiroclozer/generate-reply";
 
 export const POST_QUIZ_STAGES = {
@@ -219,7 +219,7 @@ export async function buildMaterialAnalysis(params: {
     params.materialText,
   ].join("\n");
 
-  return generateAnthropicText(prompt, DEFAULT_MATERIAL_ANALYSIS_TOKENS);
+  return generateAiText(prompt, DEFAULT_MATERIAL_ANALYSIS_TOKENS);
 }
 
 function extractReadableTextFromHtml(html: string) {

@@ -27,21 +27,7 @@ function isQuestionText(text: string) {
 }
 
 function isSimpleAffirmative(text: string) {
-  return hasAny(text, [
-    "да",
-    "давай",
-    "давайте",
-    "ок",
-    "окей",
-    "хочу",
-    "готов",
-    "готова",
-    "согласен",
-    "согласна",
-    "передавай",
-    "передай",
-    "интересно",
-  ]);
+  return /^(?:да|давай(?:те)?|ок(?:ей)?|готов[а]?|соглас(?:ен|на)|передавай|передай)(?:[.! ,]|$)/u.test(text);
 }
 
 function isSimpleNegative(text: string) {
@@ -97,7 +83,7 @@ export function detectPostQuizIntent(params: PostQuizIntentParams): PostQuizInte
   if (
     params.hasDocument ||
     (hasUrl && (stage === "materials_requested" || requestsMaterialAnalysis(text))) ||
-    (!hasUrl && isMaterialText(text))
+    (!hasUrl && !isQuestionText(text) && isMaterialText(text) && (stage === "materials_requested" || requestsMaterialAnalysis(text)))
   ) {
     return "material_provided";
   }

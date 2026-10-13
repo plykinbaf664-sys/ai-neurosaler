@@ -1,7 +1,7 @@
 import "server-only";
 
-import { getLibraryProgress, upsertLibraryProgress, type LibraryMaterialRow } from "@/lib/storage";
-import { cancelLibraryFollowup, scheduleLibraryFollowup } from "@/lib/library/followups";
+import { completeLibraryMaterial, getLibraryProgress, upsertLibraryProgress, type LibraryMaterialRow } from "@/lib/storage";
+import { cancelLibraryFollowup, scheduleLibraryFollowup, scheduleNextStepFollowup } from "@/lib/library/followups";
 import { getCategoryMaterials } from "@/lib/library/materials";
 import { refreshLibraryUserProfile } from "@/lib/library/user-profile";
 import { trackUserEvent } from "@/lib/tracking/events";
@@ -36,7 +36,11 @@ export async function getCategoryProgress(userId: string, category: string): Pro
   };
 }
 
-export async function markMaterialOpened(userId: string, material: LibraryMaterialRow) {
+export async function markMaterialOpened(
+  userId: string,
+  material: LibraryMaterialRow,
+  options: { refreshProfile?: boolean } = {},
+) {
   const [current] = await getLibraryProgress(userId, [material.id]);
   await upsertLibraryProgress(userId, material.id, "opened");
   await trackUserEvent({
@@ -53,32 +57,16 @@ export async function markMaterialOpened(userId: string, material: LibraryMateri
       first_open: !current,
     },
   });
-  await refreshLibraryUserProfile(userId);
+  if (options.refreshProfile !== false) await refreshLibraryUserProfile(userId);
   if (current?.status !== "completed") await scheduleLibraryFollowup(userId, material);
 }
 
 export async function markMaterialCompleted(userId: string, material: LibraryMaterialRow) {
-  const [current] = await getLibraryProgress(userId, [material.id]);
-
-  if (current?.status !== "completed") {
-    await upsertLibraryProgress(userId, material.id, "completed");
-    await trackUserEvent({
-      userId,
-      eventName: "material_completed",
-      materialId: material.id,
-      category: material.category,
-      metadata: {
-        topic: material.topic,
-        slug: material.slug,
-        title: material.title,
-        route: material.category,
-        status: "completed",
-      },
-    });
-  }
+  await completeLibraryMaterial(userId, material.id);
 
   await refreshLibraryUserProfile(userId);
   await cancelLibraryFollowup(userId);
+  await scheduleNextStepFollowup(userId);
 
   return getCategoryProgress(userId, material.category);
 }

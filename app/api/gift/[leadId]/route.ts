@@ -33,7 +33,7 @@ export async function GET(
     await updateLeadById(leadId, {
       giftLinkClickedAt: new Date().toISOString(),
       giftFollowupDueAt: null,
-      currentStage: "gift_viewed",
+      currentStage: ["gift_sent", "awaiting_qualification_reply"].includes(lead.current_stage) ? "gift_viewed" : lead.current_stage,
     });
   }
 

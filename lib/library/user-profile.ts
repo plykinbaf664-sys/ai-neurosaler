@@ -78,9 +78,9 @@ export async function refreshLibraryUserProfile(userId: string) {
       : current?.last_route ?? null;
 
   return upsertUserLibraryProfile(userId, {
-    selected_categories: unique(selectedEvents.map((event) => event.category ?? "")),
-    opened_topics: topicParts(openedEvents),
-    completed_topics: topicParts(completedEvents),
+    selected_categories: unique([...selectedEvents.map((event) => event.category ?? ""), ...(current?.selected_categories ?? [])]),
+    opened_topics: unique([...topicParts(openedEvents), ...(current?.opened_topics ?? [])]),
+    completed_topics: unique([...topicParts(completedEvents), ...(current?.completed_topics ?? [])]),
     last_route: lastRoute,
     last_category:
       lastMaterialEvent?.category === "life" || lastMaterialEvent?.category === "business"
@@ -102,9 +102,9 @@ export async function refreshLibraryUserProfile(userId: string) {
           : lastMaterialEvent?.event_name === "material_presented"
             ? null
             : current?.last_material_status ?? null,
-    completed_count: completedKeys.length,
+    completed_count: Math.max(current?.completed_count ?? 0, completedKeys.length),
     engagement_score: Math.min(100, selectedEvents.length + openedKeys.length + completedKeys.length * 2),
-    last_interaction_at: lastInteractionEvent?.created_at ?? current?.last_interaction_at ?? new Date().toISOString(),
+    last_interaction_at: [lastInteractionEvent?.created_at, current?.last_interaction_at].filter((value): value is string => Boolean(value)).sort().at(-1) ?? new Date().toISOString(),
   });
 }
 

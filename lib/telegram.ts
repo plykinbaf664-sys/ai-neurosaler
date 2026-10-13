@@ -80,6 +80,7 @@ type TelegramReplyMarkup = {
     text: string;
     callback_data?: string;
     url?: string;
+    web_app?: { url: string };
   }[][];
   resize_keyboard?: boolean;
   one_time_keyboard?: boolean;
@@ -95,7 +96,7 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
-function convertMarkdownToTelegramHtml(text: string) {
+export function convertMarkdownToTelegramHtml(text: string) {
   const codeBlocks: string[] = [];
   const withPlaceholders = text.replace(/```([\s\S]*?)```/g, (_, code: string) => {
     const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
@@ -103,18 +104,32 @@ function convertMarkdownToTelegramHtml(text: string) {
     return placeholder;
   });
 
-  let formatted = escapeHtml(withPlaceholders);
-
-  formatted = formatted.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_, label: string, url: string) => `<a href="${escapeHtml(url)}">${label}</a>`,
+  const markdownLinks: string[] = [];
+  const withLinkPlaceholders = withPlaceholders.replace(
+    /\[([^\]]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g,
+    (_, label: string, rawUrl: string) => {
+      try {
+        const parsedUrl = new URL(rawUrl);
+        if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") return label;
+        const placeholder = `__TELEGRAM_LINK_${markdownLinks.length}__`;
+        markdownLinks.push(`<a href="${escapeHtml(parsedUrl.toString())}">${escapeHtml(label)}</a>`);
+        return placeholder;
+      } catch {
+        return label;
+      }
+    },
   );
+
+  let formatted = escapeHtml(withLinkPlaceholders);
   formatted = formatted.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
   formatted = formatted.replace(/(^|\W)\*([^*\n]+)\*(?=\W|$)/g, "$1<i>$2</i>");
   formatted = formatted.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  markdownLinks.forEach((link, index) => {
+    formatted = formatted.replace(`__TELEGRAM_LINK_${index}__`, () => link);
+  });
 
   return codeBlocks.reduce(
-    (result, block, index) => result.replace(`__CODE_BLOCK_${index}__`, block),
+    (result, block, index) => result.replace(`__CODE_BLOCK_${index}__`, () => block),
     formatted,
   );
 }

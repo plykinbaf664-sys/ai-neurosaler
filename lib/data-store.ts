@@ -18,6 +18,8 @@ type LeadRow = {
   current_stage: string;
   matched_offer: string | null;
   last_user_message: string | null;
+  audit_request?: string | null;
+  audit_requested_at?: string | null;
   warmth_level: string;
   gift_link_clicked_at: string | null;
   gift_followup_due_at: string | null;
@@ -124,6 +126,8 @@ type LeadUpsertInput = {
   matchedOffer: string | null;
   lastUserMessage: string | null;
   warmthLevel: string;
+  auditRequest?: string | null;
+  auditRequestedAt?: string | null;
   giftLinkClickedAt?: string | null;
   giftFollowupDueAt?: string | null;
   giftFollowupSentAt?: string | null;
@@ -188,6 +192,10 @@ type LibraryProgressRow = {
 };
 
 type UserEventName =
+  | "audit_requested"
+  | "audit_request_saved"
+  | "calendar_link_sent"
+  | "journey_updated"
   | "prediction_ball_opened"
   | "prediction_ball_spun"
   | "library_opened"
@@ -236,6 +244,11 @@ type UserLibraryProfileRow = {
   last_followup_sent_at: string | null;
   next_followup_due_at: string | null;
   updated_at: string;
+  journey_goal?: string | null;
+  recommended_material_ids?: string[];
+  active_days?: number;
+  last_active_date?: string | null;
+  reminders_enabled?: boolean;
 };
 
 type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
@@ -374,7 +387,7 @@ async function persistDatabase(database: LocalDatabase) {
 
   const dataFilePath = getDataFilePath();
   await mkdir(path.dirname(dataFilePath), { recursive: true });
-  await writeFile(dataFilePath, `${JSON.stringify(database, null, 2)}\n`, "utf8");
+  await writeFile(dataFilePath, `${JSON.stringify(database)}\n`, "utf8");
 }
 
 async function loadDatabase() {
@@ -565,6 +578,8 @@ export async function createLead(input: LeadUpsertInput) {
       current_stage: input.currentStage,
       matched_offer: input.matchedOffer,
       last_user_message: input.lastUserMessage,
+      audit_request: input.auditRequest ?? null,
+      audit_requested_at: input.auditRequestedAt ?? null,
       warmth_level: input.warmthLevel,
       gift_link_clicked_at: input.giftLinkClickedAt ?? null,
       gift_followup_due_at: input.giftFollowupDueAt ?? null,
@@ -590,6 +605,8 @@ export async function updateLeadById(leadId: string, input: Partial<LeadUpsertIn
     if (input.telegramUserId !== undefined) lead.telegram_user_id = input.telegramUserId;
     if (input.telegramChatId !== undefined) lead.telegram_chat_id = input.telegramChatId;
     if (input.telegramUsername !== undefined) lead.telegram_username = input.telegramUsername;
+    if (input.auditRequest !== undefined) lead.audit_request = input.auditRequest;
+    if (input.auditRequestedAt !== undefined) lead.audit_requested_at = input.auditRequestedAt;
     if (input.firstName !== undefined) lead.first_name = input.firstName;
     if (input.lastName !== undefined) lead.last_name = input.lastName;
     if (input.source !== undefined) lead.source = input.source;
@@ -606,7 +623,7 @@ export async function updateLeadById(leadId: string, input: Partial<LeadUpsertIn
   });
 }
 
-export async function insertMessage(input: MessageInsertInput) {
+export async function insertMessage(input: MessageInsertInput, keep?: number) {
   return mutateDatabase((database) => {
     const message: MessageRow = {
       id: randomUUID(),
@@ -621,23 +638,26 @@ export async function insertMessage(input: MessageInsertInput) {
     };
 
     database.messages.push(message);
+    if (keep !== undefined) pruneDatabaseMessages(database, input.leadId, keep);
     return message;
   });
 }
 
 export async function pruneMessagesByLeadId(leadId: string, keep: number) {
-  return mutateDatabase((database) => {
-    const keptIds = new Set(
-      database.messages
-        .filter((message) => message.lead_id === leadId)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at))
-        .slice(0, keep)
-        .map((message) => message.id),
-    );
-    database.messages = database.messages.filter(
-      (message) => message.lead_id !== leadId || keptIds.has(message.id),
-    );
-  });
+  return mutateDatabase((database) => pruneDatabaseMessages(database, leadId, keep));
+}
+
+function pruneDatabaseMessages(database: LocalDatabase, leadId: string, keep: number) {
+  const keptIds = new Set(
+    database.messages
+      .filter((message) => message.lead_id === leadId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, keep)
+      .map((message) => message.id),
+  );
+  database.messages = database.messages.filter(
+    (message) => message.lead_id !== leadId || keptIds.has(message.id),
+  );
 }
 
 export async function getLocalStoreSummary() {
@@ -708,18 +728,22 @@ export async function getAdminAnalytics(period: AnalyticsPeriod) {
 }
 
 export async function getAdminLeads() {
-  return readDatabase((database) =>
-    [...database.leads]
+  return readDatabase((database) => {
+    const messageMetadata = new Map<string, { count: number; last: string }>();
+    for (const message of database.messages) {
+      const current = messageMetadata.get(message.lead_id) ?? { count: 0, last: "" };
+      current.count++;
+      if (message.created_at > current.last) current.last = message.created_at;
+      messageMetadata.set(message.lead_id, current);
+    }
+    return [...database.leads]
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .map((lead) => {
-        const messages = database.messages.filter((message) => message.lead_id === lead.id);
-        return {
-          ...lead,
-          messageCount: messages.length,
-          lastMessageAt: messages.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.created_at ?? null,
-        };
-      }),
-  );
+      .map((lead) => ({
+        ...lead,
+        messageCount: messageMetadata.get(lead.id)?.count ?? 0,
+        lastMessageAt: messageMetadata.get(lead.id)?.last ?? null,
+      }));
+  });
 }
 
 export async function getRecentLeadDialogues(limit = 8) {
@@ -914,6 +938,56 @@ export async function getDueLibraryFollowupProfiles(nowIso: string, limit = 20) 
       .sort((a, b) => a.next_followup_due_at!.localeCompare(b.next_followup_due_at!))
       .slice(0, limit),
   );
+}
+
+export async function recordUserActivity(userId: string) {
+  if (!await getUserLibraryProfile(userId)) await upsertUserLibraryProfile(userId, {});
+  await mutateDatabase((database) => {
+    const profile = database.userLibraryProfiles.find((item) => item.user_id === userId)!;
+    const now = new Date().toISOString();
+    const date = now.slice(0, 10);
+    if (profile.last_active_date !== date) profile.active_days = (profile.active_days ?? 0) + 1;
+    profile.last_active_date = date;
+    profile.last_interaction_at = now;
+  });
+}
+
+export async function completeLibraryMaterial(userId: string, materialId: string) {
+  await mutateDatabase((database) => {
+    const material = database.libraryMaterials.find((item) => item.id === materialId && item.is_active);
+    if (!material) throw new Error("Active material not found");
+    const existing = database.libraryProgress.find((item) => item.user_id === userId && item.material_id === materialId);
+    if (existing?.status === "completed") return;
+    const now = new Date().toISOString();
+    if (existing) { existing.status = "completed"; existing.updated_at = now; }
+    else database.libraryProgress.push({ id: randomUUID(), user_id: userId, material_id: materialId, status: "completed", created_at: now, updated_at: now });
+    database.userEvents.push({ id: randomUUID(), user_id: userId, event_name: "material_completed", material_id: materialId, category: material.category,
+      metadata: { topic: material.topic, slug: material.slug, title: material.title, route: material.category, status: "completed" }, created_at: now });
+  });
+}
+
+export async function grantUserReward(userId: string, key: string, metadata: Record<string, unknown>) {
+  return mutateDatabase((database) => {
+    if (database.userEvents.some((event) => event.user_id === userId && event.event_name === "reward_unlocked" && event.category === key)) return false;
+    database.userEvents.push({ id: randomUUID(), user_id: userId, event_name: "reward_unlocked", category: key,
+      material_id: null, metadata, created_at: new Date().toISOString() });
+    return true;
+  });
+}
+
+export async function getUserRewards(userId: string) {
+  return readDatabase((database) => database.userEvents.filter((event) => event.user_id === userId && event.event_name === "reward_unlocked").slice(0, 100));
+}
+
+export async function claimLibraryFollowup(userId: string, dueAt: string, nowIso: string, lastInteractionAt: string) {
+  return mutateDatabase((database) => {
+    const profile = database.userLibraryProfiles.find((item) => item.user_id === userId);
+    if (!profile || profile.last_interaction_at !== lastInteractionAt || profile.reminders_enabled === false || profile.next_followup_due_at !== dueAt || dueAt > nowIso) return false;
+    if (profile.last_followup_sent_at && Date.parse(nowIso) - Date.parse(profile.last_followup_sent_at) < 86_400_000) return false;
+    profile.next_followup_due_at = null;
+    profile.last_followup_sent_at = nowIso;
+    return true;
+  });
 }
 
 export type {

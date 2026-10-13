@@ -52,12 +52,10 @@ export const localStorageAdapter: StorageAdapter = {
   createLead: localStore.createLead,
   updateLeadById: localStore.updateLeadById,
   async insertMessage(input: MessageInsertInput) {
-    const message = await localStore.insertMessage({
+    return localStore.insertMessage({
       ...input,
       text: truncateStoredText(input.text, MAX_STORED_MESSAGE_CHARS) ?? "",
-    });
-    await localStore.pruneMessagesByLeadId(input.leadId, MAX_MESSAGE_HISTORY);
-    return message;
+    }, MAX_MESSAGE_HISTORY);
   },
   async getStorageSummary() {
     const summary = await localStore.getLocalStoreSummary();
@@ -83,6 +81,11 @@ export const localStorageAdapter: StorageAdapter = {
   upsertLibraryProgress: localStore.upsertLibraryProgress,
   insertUserEvent: localStore.insertUserEvent,
   claimPredictionBallSpin: localStore.claimPredictionBallSpin,
+  recordUserActivity: localStore.recordUserActivity,
+  completeLibraryMaterial: localStore.completeLibraryMaterial,
+  grantUserReward: localStore.grantUserReward,
+  getUserRewards: localStore.getUserRewards,
+  claimLibraryFollowup: localStore.claimLibraryFollowup,
   hasUserEvent: localStore.hasUserEvent,
   getRecentUserEvents: localStore.getRecentUserEvents,
   getUserLibraryProfile: localStore.getUserLibraryProfile,
