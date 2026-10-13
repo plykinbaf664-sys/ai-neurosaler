@@ -181,8 +181,9 @@ For Supabase migration changes:
 4. test against a safe database where available;
 5. confirm application code works with the migration state expected by rollout.
 
-Current project context states migration `014` still needs to be applied for new functionality.
-Verify whether that is still true before applying anything.
+Migration `014` was confirmed in the inspected deployment. The dynamic-library patch requires `015`
+before deployment. `node scripts/verify-journey-migration.mjs` uses optional PGlite (or `PGLITE_MODULE`)
+to test all migrations in isolation, including repeatability of 014/015 and guidance/local-seed parity.
 
 Do not edit migration history blindly.
 
@@ -257,3 +258,10 @@ Bad:
 - "reminders are live" when cron was not deployed/enabled.
 
 If something remains unverified, state it explicitly.
+
+Dynamic-library regression coverage lives in `tests/dialogue-journey.test.mjs`: post-calendar navigation,
+route updates without goal changes, feedback without completion, exhausted/empty routes, completed revisits,
+and navigation on the last Telegram chunk. Run `node --test tests/*.test.mjs` for adjacent flows.
+Set `TEST_AI_PROVIDER=qwen` to exercise the dialogue suite through the mocked Qwen adapter.
+Optional live synthetic replay: `node --env-file=.env.local scripts/check-dialogue.mjs --live --handoff`.
+It does not send Telegram messages or modify the production CRM.

@@ -142,6 +142,21 @@ user opens library
 
 Telegraph URLs are stored in `library_materials`.
 
+Material cards use `lib/library/presentation.ts` and optional compact `guidance` from the same table.
+`lib/library/dialogue.ts` assembles bounded history, catalogue guidance, CRM audit context and saved route.
+Its JSON recommendations are checked against active, incomplete, non-skipped materials before saving.
+`routeAction=keep` preserves the route; `replace` updates it independently of goal wording.
+Completed materials can be explicitly revisited for application, without changing progress.
+
+`lib/library/recommendations.ts` owns shared route/next-step selection for Telegram, Mini App and cron.
+No matching route and exhausted saved routes produce no automatic unrelated fallback.
+Explicit feedback (`needs_help`, `not_relevant`, `applied`) is a bounded latest-state map (20 entries)
+in `user_library_profiles.material_feedback`, separate from completion and rewards.
+
+Ordinary text after audit handoff returns to the library-aware dialogue; pending quiz/analysis/audit intake
+keep their existing handlers. `lib/telegram-navigation.ts` preserves action buttons and adds main-menu access.
+For multi-message replies, navigation is attached to the final chunk.
+
 ### Important rules
 
 - material count is dynamic;
@@ -349,7 +364,7 @@ Neiroclozer/library context
 
 ```text
 local tested implementation
-→ apply migration 014
+→ apply migration 015 (guidance and latest feedback; 014 already present in inspected deployment)
 → configure Qwen
 → deploy
 → enable reminders

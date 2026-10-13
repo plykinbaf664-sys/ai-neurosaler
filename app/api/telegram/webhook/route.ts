@@ -1,3 +1,4 @@
+import { withMainMenu } from "@/lib/telegram-navigation";
 import {
   createLead,
   createLeadMaterial,
@@ -117,7 +118,7 @@ async function sendMarketingRoiQuizQuestion(chatId: number, leadId: string, expe
     return null;
   }
 
-  const result = await sendTextMessage(chatId, question.text, getMarketingRoiQuizKeyboard(stage));
+  const result = await sendTextMessage(chatId, question.text, withMainMenu(getMarketingRoiQuizKeyboard(stage)));
   await insertMessage({
     leadId,
     expertProfileId,
@@ -141,7 +142,7 @@ function extractRecentMarketingRoiQuizAnswers(messages: { direction: string; tex
 }
 
 async function sendAndStoreAiReply(chatId: number, leadId: string, expertProfileId: string, text: string) {
-  const results = await sendTextMessages(chatId, text);
+  const results = await sendTextMessages(chatId, text, withMainMenu());
 
   for (const result of results) {
     await insertMessage({
@@ -159,7 +160,7 @@ async function sendAndStoreAiReply(chatId: number, leadId: string, expertProfile
 }
 
 async function sendAndStorePlainText(chatId: number, leadId: string, expertProfileId: string, text: string) {
-  const results = await sendTextMessages(chatId, text);
+  const results = await sendTextMessages(chatId, text, withMainMenu());
 
   for (const result of results) {
     await insertMessage({
@@ -183,7 +184,7 @@ async function sendAndStorePlainTextWithMarkup(
   text: string,
   replyMarkup: Parameters<typeof sendTextMessage>[2],
 ) {
-  const results = await sendTextMessages(chatId, text, replyMarkup);
+  const results = await sendTextMessages(chatId, text, withMainMenu(replyMarkup));
 
   for (const result of results) {
     await insertMessage({
@@ -228,7 +229,7 @@ async function sendAndStoreKnowledgeReply(params: {
     console.error("AI dialogue unavailable:", summarizeAiFailure(error));
     reply = "Сейчас не получилось подготовить ответ. Попробуй написать чуть позже. Библиотека через /start и запись по слову «аудит» доступны.";
   }
-  const results = await sendTextMessages(params.chatId, reply, params.replyMarkup);
+  const results = await sendTextMessages(params.chatId, reply, withMainMenu(params.replyMarkup));
 
   for (const result of results) {
     await insertMessage({
@@ -1092,6 +1093,7 @@ export async function POST(request: Request) {
       const questionResult = await sendTextMessage(
         incomingMessage.telegramChatId,
         expertProfile.first_qual_question,
+        withMainMenu(),
       );
       await insertMessage({
         leadId: lead.id,
@@ -1155,7 +1157,7 @@ export async function POST(request: Request) {
         messageType: "ai_reply",
       });
 
-      const materialsRequestResult = await sendTextMessage(incomingMessage.telegramChatId, MATERIALS_REQUEST_TEXT);
+      const materialsRequestResult = await sendTextMessage(incomingMessage.telegramChatId, MATERIALS_REQUEST_TEXT, withMainMenu());
 
       await insertMessage({
         leadId: lead.id,

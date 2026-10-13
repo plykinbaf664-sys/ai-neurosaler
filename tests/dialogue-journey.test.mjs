@@ -26,6 +26,9 @@ let sequence = 100;
 let aiReply = "Ответ на текущую реплику";
 let chosenIds = [];
 let goal = null;
+let routeAction;
+let revisitMaterialIds = [];
+let rawJourneyReply = null;
 let providerError = false;
 const calls = [];
 const prompts = [];
@@ -37,7 +40,7 @@ globalThis.fetch = async (url, init) => {
     if (providerError) return Response.json({ error: { type: "invalid_request_error", message: "Your credit balance is too low" } }, { status: 400 });
     const prompt = JSON.parse(init.body).messages[0].content;
     prompts.push(prompt);
-    const text = prompt.includes("Ответ строго JSON") ? JSON.stringify({ reply: aiReply, goal, materialIds: chosenIds }) : aiReply;
+    const text = prompt.includes("Ответ строго JSON") ? rawJourneyReply ?? JSON.stringify({ reply: aiReply, goal, materialIds: chosenIds, routeAction, revisitMaterialIds }) : aiReply;
     return Response.json(testProvider === "qwen" ? { choices: [{ message: { content: text }, finish_reason: "stop" }] }
       : { content: [{ type: "text", text }] });
   }
@@ -46,7 +49,7 @@ globalThis.fetch = async (url, init) => {
   calls.push({ method: String(url).split("/").at(-1), ...body });
   return Response.json({ ok: true, result: { message_id: ++sequence, text: body.text, username: "JourneyBot" } });
 };
-beforeEach(() => { calls.length = 0; prompts.length = 0; goal = null; chosenIds = []; providerError = false; aiReply = "Ответ на текущую реплику"; process.env.LIBRARY_FOLLOWUPS_ENABLED = "false"; });
+beforeEach(() => { calls.length = 0; prompts.length = 0; goal = null; chosenIds = []; routeAction = undefined; revisitMaterialIds = []; rawJourneyReply = null; providerError = false; aiReply = "Ответ на текущую реплику"; process.env.LIBRARY_FOLLOWUPS_ENABLED = "false"; });
 after(() => { globalThis.fetch = originalFetch; });
 
 async function post(text, user, callback = false) {
@@ -84,7 +87,7 @@ test("audit keyword asks a free-form request, persists it in CRM, then sends cal
   const lead = await storage.getLeadByTelegramUserId(801);
   assert.equal((await storage.getLeadById(lead.id)).current_stage, "audit_request_requested");
   assert.equal(lastMessage().text, aiReply);
-  assert.ok(!lastMessage().reply_markup);
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(button => button.callback_data === "nav:menu"));
   const request = "Хочу аудит продаж: много диалогов, но клиенты исчезают после цены";
   await post(request, 801);
   const updated = await storage.getLeadById(lead.id);
@@ -245,4 +248,116 @@ test("AI outage keeps the library track and submitted analysis material availabl
     assert.equal(await storage.getLeadMaterialsCount(lead.id), 1);
     assert.equal((await storage.getLeadById(lead.id)).current_stage, "audit_offered");
   }
+});
+
+test("post-calendar catalogue dialogue uses library context and always leaves navigation", async () => {
+  await post("аудит", 830);
+  await post("Хочу стабильный поток клиентов", 830);
+  const lead = await storage.getLeadByTelegramUserId(830);
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "nav:menu"));
+  chosenIds = [allMaterials.find(m => m.topic === "sales_audit").id];
+  aiReply = "Начнём с проверки потерь в существующих диалогах.";
+  await post("Какие материалы есть для бизнеса?", 830);
+  assert.ok(prompts.at(-1).includes("DATA CATALOG"));
+  assert.ok(prompts.at(-1).includes('"calendarBookingVerified":false'));
+  assert.ok(prompts.at(-1).includes("Хочу стабильный поток клиентов"));
+  assert.ok(lastMessage().text.includes("<b>Когда пригодится</b>"));
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "nav:menu"));
+  assert.equal((await storage.getLeadById(lead.id)).current_stage, "handoff");
+  await post("nav:menu", 830, true);
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "lib:cat:life"));
+});
+
+test("route changes without a new goal persist; feedback changes recommendations but never learning progress", async () => {
+  await post("/start", 831);
+  const lead = await storage.getLeadByTelegramUserId(831);
+  const second = allMaterials.find(m => m.category === "life" && m.id !== decision.id);
+  await storage.upsertUserLibraryProfile(lead.id, { journey_goal: "Разобраться с выбором", recommended_material_ids: [second.id] });
+  chosenIds = [decision.id, second.id]; routeAction = "replace";
+  await post("Покажи более подходящий порядок", 831);
+  assert.deepEqual((await storage.getUserLibraryProfile(lead.id)).recommended_material_ids, chosenIds);
+  routeAction = "keep"; chosenIds = [];
+  await post(`lib:help:${decision.id}`, 831, true);
+  assert.ok(prompts.at(-1).includes('"guidance"'));
+  assert.ok(prompts.at(-1).includes(decision.title));
+  await post(`lib:applied:${decision.id}`, 831, true);
+  let dashboard = await getJourneyDashboard(lead.id, "https://neiro.test");
+  assert.equal(dashboard.completed, 0);
+  assert.equal(dashboard.track[0].feedback, "applied");
+  assert.equal(dashboard.rewards.find(r => r.key === "first_step").unlocked, false);
+  await post(`lib:skip:${decision.id}`, 831, true);
+  const profile = await storage.getUserLibraryProfile(lead.id);
+  assert.equal(profile.material_feedback[decision.id], "not_relevant");
+  assert.deepEqual(profile.recommended_material_ids, [second.id]);
+  dashboard = await getJourneyDashboard(lead.id, "https://neiro.test");
+  assert.equal(dashboard.nextMaterialId, second.id);
+  assert.equal((await getNextMaterialAfter(lead.id, decision)).id, second.id);
+  chosenIds = [decision.id]; routeAction = "replace";
+  await post("Что дальше?", 831);
+  assert.deepEqual((await storage.getUserLibraryProfile(lead.id)).recommended_material_ids, [second.id]);
+  assert.ok(!lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === `lib:mat:${decision.id}`));
+  assert.equal((await storage.getLibraryProgress(lead.id, allMaterials.map(m => m.id))).length, 0);
+  assert.ok(!(await storage.getRecentUserEvents(lead.id)).some(e => e.event_name === "material_completed"));
+  process.env.LIBRARY_FOLLOWUPS_ENABLED = "true";
+  await storage.upsertUserLibraryProfile(lead.id, { last_interaction_at: "2020-01-01T00:00:00.000Z", next_followup_due_at: "2020-01-02T00:00:00.000Z" });
+  await sendDueLibraryFollowups();
+  assert.equal(lastMessage().reply_markup.inline_keyboard[0][0].callback_data, `lib:mat:${second.id}`);
+});
+
+test("empty and exhausted routes do not invent a next step; completed cards are explicitly revisits", async () => {
+  await post("/start", 832);
+  const lead = await storage.getLeadByTelegramUserId(832);
+  await storage.upsertUserLibraryProfile(lead.id, { journey_goal: "Сделать выбор", recommended_material_ids: [decision.id], last_category: "life" });
+  await markMaterialCompleted(lead.id, decision);
+  let dashboard = await getJourneyDashboard(lead.id, "https://neiro.test");
+  assert.equal(dashboard.routeFinished, true);
+  assert.equal(dashboard.nextMaterialId, null);
+  assert.equal(await getNextMaterialAfter(lead.id, decision), null);
+  revisitMaterialIds = [decision.id];
+  await post("Помоги ещё раз применить изученное", 832);
+  assert.ok(lastMessage().text.includes("Уже изучено"));
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.text.startsWith("↩ Практика")));
+  goal = "Задача, для которой в каталоге ничего нет"; routeAction = "replace"; revisitMaterialIds = [];
+  await post("Теперь у меня другая задача", 832);
+  dashboard = await getJourneyDashboard(lead.id, "https://neiro.test");
+  assert.equal(dashboard.track.length, 0);
+  assert.equal(dashboard.nextMaterialId, null);
+  process.env.LIBRARY_FOLLOWUPS_ENABLED = "true";
+  assert.equal(await scheduleNextStepFollowup(lead.id), false);
+});
+
+test("long Telegram replies leave buttons on the final message and escape catalogue HTML", async () => {
+  const { sendTextMessages } = await import("../lib/telegram.ts");
+  const { formatMaterialCard } = await import("../lib/library/presentation.ts");
+  await sendTextMessages(1, "Абзац с текстом.\n\n".repeat(500), { inline_keyboard: [[{ text: "Меню", callback_data: "nav:menu" }]] });
+  const messages = calls.filter(c => c.method === "sendMessage");
+  assert.ok(messages.length > 1);
+  assert.ok(!messages[0].reply_markup);
+  assert.equal(messages.at(-1).reply_markup.inline_keyboard[0][0].callback_data, "nav:menu");
+  const html = convertMarkdownToTelegramHtml(formatMaterialCard({ ...decision, title: "<script> & тест" }, { detailed: true }));
+  assert.ok(html.includes("&lt;script&gt; &amp; тест"));
+  assert.ok(html.includes("<b>С чего начать</b>"));
+});
+
+test("malformed model JSON preserves the saved route and a working continuation button", async () => {
+  await post("/start", 833);
+  const lead = await storage.getLeadByTelegramUserId(833);
+  await storage.upsertUserLibraryProfile(lead.id, { journey_goal: "Выбрать работу", recommended_material_ids: [decision.id] });
+  rawJourneyReply = '{"reply":"broken';
+  await post("Что делать дальше?", 833);
+  assert.ok(lastMessage().text.includes("не получилось подготовить ответ"));
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === `lib:mat:${decision.id}`));
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "nav:menu"));
+  assert.deepEqual((await storage.getUserLibraryProfile(lead.id)).recommended_material_ids, [decision.id]);
+  assert.equal((await storage.getLibraryProgress(lead.id, [decision.id])).length, 0);
+});
+
+test("explicit application help exits pending audit intake so the next practice reply is not saved as an audit request", async () => {
+  await post("аудит", 834);
+  await post(`lib:help:${decision.id}`, 834, true);
+  await post("Выписал факты, что проверить дальше?", 834);
+  const lead = await storage.getLeadByTelegramUserId(834);
+  assert.equal(lead.current_stage, "ecosystem_menu");
+  assert.ok(!lead.audit_request);
+  assert.ok(prompts.at(-1).includes("DATA CATALOG"));
 });

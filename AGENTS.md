@@ -106,7 +106,7 @@ Preserve these unless the task explicitly changes the product model:
 At the time this context was written:
 
 - local implementation has been checked with tests and build;
-- migration `014` still needs to be applied for the new functionality;
+- migration `014` was confirmed in the inspected deployment; the dynamic-library patch requires `015` before deployment;
 - Qwen is the selected primary AI provider;
 - Anthropic remains an alternative provider;
 - local live Qwen checks passed with `qwen3.8-max`: JSON output and a two-turn library dialogue; deployed runtime remains unverified;

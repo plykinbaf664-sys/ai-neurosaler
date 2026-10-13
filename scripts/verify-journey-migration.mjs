@@ -12,11 +12,26 @@ try {
     await db.exec(sql);
   }
   await db.exec(await readFile("supabase/sql/014_journey_and_audit.sql", "utf8"));
+  await db.exec(await readFile("supabase/sql/015_dynamic_library.sql", "utf8"));
+  const seed = JSON.parse(await readFile("data/local-db.seed.json", "utf8"));
+  const catalogue = (await db.query("select slug,guidance from library_materials where is_active order by slug")).rows;
+  for (const material of catalogue) {
+    assert.deepEqual(material.guidance, seed.libraryMaterials.find(item => item.slug === material.slug).guidance);
+  }
+  const total = catalogue.length;
+  await db.query("update library_materials set guidance=$1 where slug=$2", [{ when_to_use: "Editorial change", outcome: "Preserved", steps: [] }, catalogue[0].slug]);
+  await db.exec(await readFile("supabase/sql/015_dynamic_library.sql", "utf8"));
+  assert.equal((await db.query("select guidance from library_materials where slug=$1", [catalogue[0].slug])).rows[0].guidance.outcome, "Preserved");
+  assert.equal(Number((await db.query("select count(*) as n from library_materials where is_active")).rows[0].n), total);
   const { rows: [lead] } = await db.query("insert into leads (telegram_user_id, telegram_chat_id) values (1, 1) returning id");
   await db.query("select record_user_activity($1)", [lead.id]);
   await db.query("select record_user_activity($1)", [lead.id]);
   let profile = (await db.query("select * from user_library_profiles where user_id=$1", [lead.id])).rows[0];
   assert.equal(profile.active_days, 1);
+  assert.deepEqual(profile.material_feedback, {});
+  await db.query("update user_library_profiles set material_feedback=$2 where user_id=$1", [lead.id, { test: "applied" }]);
+  await db.exec(await readFile("supabase/sql/015_dynamic_library.sql", "utf8"));
+  assert.deepEqual((await db.query("select material_feedback from user_library_profiles where user_id=$1", [lead.id])).rows[0].material_feedback, { test: "applied" });
   await db.query("update user_library_profiles set last_active_date = last_active_date - 1 where user_id=$1", [lead.id]);
   await db.query("select record_user_activity($1)", [lead.id]);
   assert.equal((await db.query("select active_days from user_library_profiles where user_id=$1", [lead.id])).rows[0].active_days, 2);
@@ -35,5 +50,5 @@ try {
   assert.equal((await db.query("select audit_request from leads where id=$1", [lead.id])).rows[0].audit_request, "Проверочный запрос на аудит");
   assert.equal((await db.query("select has_function_privilege('anon','public.record_user_activity(uuid)','execute') as allowed")).rows[0].allowed, false);
   assert.equal((await db.query("select has_function_privilege('service_role','public.record_user_activity(uuid)','execute') as allowed")).rows[0].allowed, true);
-  console.log("All migrations applied; 014 is repeatable. Activity, durable intake, single award, single reminder claim and RPC permissions passed.");
+  console.log("All migrations applied; 014/015 repeatable. Guidance matches local seed; editorial changes and feedback preserved. Activity, intake, single award, single reminder claim and RPC permissions passed.");
 } finally { await db.close(); }

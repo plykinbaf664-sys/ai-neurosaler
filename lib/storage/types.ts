@@ -184,11 +184,15 @@ export type StoredRowRef = { id: string };
 
 export type LibraryCategory = string;
 
+export type MaterialGuidance = { when_to_use: string; outcome: string; steps: string[] };
+export type MaterialFeedback = "needs_help" | "not_relevant" | "applied";
+
 export type LibraryMaterialRow = {
   id: string;
   slug: string;
   title: string;
   short_description: string;
+  guidance?: MaterialGuidance | null;
   category: LibraryCategory;
   topic: string;
   url: string;
@@ -264,6 +268,7 @@ export type UserLibraryProfileRow = {
   updated_at: string;
   journey_goal?: string | null;
   recommended_material_ids?: string[];
+  material_feedback?: Record<string, MaterialFeedback>;
   active_days?: number;
   last_active_date?: string | null;
   reminders_enabled?: boolean;

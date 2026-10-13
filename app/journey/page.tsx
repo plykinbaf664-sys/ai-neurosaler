@@ -53,8 +53,15 @@ export default function JourneyPage() {
             <div className={styles.sectionHeading}><p className={styles.eyebrow}>С ЧЕГО НАЧАТЬ</p><h2>{data.goal || "Маршрут под твою задачу"}</h2><p>В своём темпе. По одному полезному шагу.</p></div>
             {data.track.length ? <ol className={styles.track}>{data.track.map((material, index) => <li key={material.id}>
               <span className={styles.step}>{material.completed ? "✓" : String(index + 1).padStart(2, "0")}</span>
-              <article><p className={styles.kicker}>{material.completed ? "УЖЕ В КОПИЛКЕ" : "ТВОЙ СЛЕДУЮЩИЙ ШАГ"}</p><h3>{material.title}</h3><p>{material.description}</p><button className={styles.open} onClick={() => window.Telegram?.WebApp?.openLink(material.url)}>{material.completed ? "Вернуться к материалу" : "Открыть материал"} <span>↗</span></button></article>
+              <article>
+                <p className={styles.kicker}>{material.completed ? "УЖЕ В КОПИЛКЕ" : material.isNext ? "ТВОЙ СЛЕДУЮЩИЙ ШАГ" : "ДАЛЬШЕ В МАРШРУТЕ"}</p>
+                <h3>{material.title}</h3><p>{material.description}</p>
+                {material.guidance && <><p><strong>Когда пригодится</strong><br />{material.guidance.when_to_use}</p><p><strong>Что получится</strong><br />{material.guidance.outcome}</p></>}
+                {material.feedback === "applied" && <p>✨ Уже применил на практике</p>}
+                <button className={styles.open} onClick={() => window.Telegram?.WebApp?.openLink(material.url)}>{material.completed ? "Вернуться к материалу" : "Открыть материал"} <span>↗</span></button>
+              </article>
             </li>)}</ol> : <div className={styles.empty}><span>✧</span><h3>Начнём с того, что важно тебе</h3><p>Расскажи боту, что хочешь изменить в жизни или работе. Он предложит материалы под твою задачу.</p><button className={styles.open} onClick={close}>Рассказать о задаче ↗</button></div>}
+            {data.routeFinished && <p className={styles.note}>Маршрут изучен. Вернись в бот, чтобы разобрать применение или выбрать новую задачу.</p>}
             <p className={styles.note}>После чтения вернись в бот и нажми «Я прочитал» — прогресс сохранится здесь.</p>
           </section> : <section>
             <div className={styles.sectionHeading}><p className={styles.eyebrow}>КОЛЛЕКЦИЯ ОТКРЫТИЙ</p><h2>У каждого шага<br />есть свой знак.</h2><p>Достижения остаются с тобой. Без гонки и обнулений.</p></div>

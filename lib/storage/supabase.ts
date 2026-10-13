@@ -43,11 +43,11 @@ const LEAD_COLUMNS =
 const MESSAGE_COLUMNS =
   "id,lead_id,expert_profile_id,direction,channel,telegram_message_id,text,message_type,created_at";
 const LIBRARY_MATERIAL_COLUMNS =
-  "id,slug,title,short_description,category,topic,url,position,is_active,created_at,updated_at";
+  "id,slug,title,short_description,guidance,category,topic,url,position,is_active,created_at,updated_at";
 const LIBRARY_PROGRESS_COLUMNS = "id,user_id,material_id,status,created_at,updated_at";
 const USER_EVENT_COLUMNS = "id,user_id,event_name,material_id,category,metadata,created_at";
 const USER_LIBRARY_PROFILE_COLUMNS =
-  "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at,journey_goal,recommended_material_ids,active_days,last_active_date,reminders_enabled";
+  "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at,journey_goal,recommended_material_ids,material_feedback,active_days,last_active_date,reminders_enabled";
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -228,6 +228,7 @@ function userLibraryProfilePayload(input: UserLibraryProfilePatch) {
       next_followup_due_at: input.next_followup_due_at,
       journey_goal: input.journey_goal,
       recommended_material_ids: input.recommended_material_ids,
+      material_feedback: input.material_feedback,
       reminders_enabled: input.reminders_enabled,
     }).filter(([, value]) => value !== undefined),
   );

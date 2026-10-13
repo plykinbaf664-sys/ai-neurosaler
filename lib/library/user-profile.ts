@@ -83,8 +83,8 @@ export async function refreshLibraryUserProfile(userId: string) {
     completed_topics: unique([...topicParts(completedEvents), ...(current?.completed_topics ?? [])]),
     last_route: lastRoute,
     last_category:
-      lastMaterialEvent?.category === "life" || lastMaterialEvent?.category === "business"
-        ? lastMaterialEvent.category
+      lastRoute === "life" || lastRoute === "business"
+        ? lastRoute
         : current?.last_category ?? null,
     last_material_slug: lastMaterialEvent
       ? metadataText(lastMaterialEvent, "slug") || current?.last_material_slug || null
@@ -139,7 +139,7 @@ export function detectLibraryUserIntent(text: string): LibraryUserIntent {
   if (/(попробовал|сделал|прочитал|посмотрел|получилось)/.test(normalized)) return "tried";
   if (/(не понял|непонят|не зашло|не работает)/.test(normalized)) return "confused";
   if (/(напомни|напомнить)/.test(normalized)) return "reminder_request";
-  if (/(что посовету|что дальше|дальше посмотр|следующ)/.test(normalized)) return "recommendation";
+  if (/(что посовету|порекоменду|что дальше|дальше посмотр|следующ)/.test(normalized)) return "recommendation";
   if (/(что это|что за материал|про что|о чем|материал)/.test(normalized)) return "material_question";
   if (/(как дела|как у тебя дела|как ты|привет|спасибо)/.test(normalized)) return "smalltalk";
   return "other";

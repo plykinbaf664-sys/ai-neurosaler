@@ -1,5 +1,6 @@
 import "server-only";
-import { claimLibraryFollowup, getActiveLibraryMaterials, getDueLibraryFollowupProfiles, getLeadById, getLibraryProgress, getUserLibraryProfile, insertMessage, upsertUserLibraryProfile, type LibraryMaterialRow, type UserLibraryProfileRow } from "@/lib/storage";
+import { claimLibraryFollowup, getDueLibraryFollowupProfiles, getLeadById, getUserLibraryProfile, insertMessage, upsertUserLibraryProfile, type LibraryMaterialRow, type UserLibraryProfileRow } from "@/lib/storage";
+import { getLibraryJourneyState, selectNextMaterial } from "@/lib/library/recommendations";
 import { sendTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
 
@@ -14,11 +15,7 @@ function addHours(iso: string, hours: number) {
 export function isLibraryFollowupsEnabled() { return process.env.LIBRARY_FOLLOWUPS_ENABLED === "true"; }
 
 async function nextStep(userId: string, profile: UserLibraryProfileRow) {
-  const materials = await getActiveLibraryMaterials();
-  const progress = await getLibraryProgress(userId, materials.map((material) => material.id));
-  const completed = new Set(progress.filter((item) => item.status === "completed").map((item) => item.material_id));
-  const preferred = (profile.recommended_material_ids ?? []).flatMap((id) => materials.filter((material) => material.id === id));
-  return [...preferred, ...materials.filter((material) => material.category === profile.last_category)].find((material) => !completed.has(material.id)) ?? null;
+  return selectNextMaterial(await getLibraryJourneyState(userId, profile));
 }
 
 export function buildLibraryFollowupText(profile: UserLibraryProfileRow, next?: LibraryMaterialRow | null) {

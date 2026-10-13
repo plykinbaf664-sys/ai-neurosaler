@@ -227,7 +227,7 @@ The current implementation has been checked locally with tests and build.
 
 Remaining launch work stated in current project context:
 
-1. apply migration `014`;
+1. apply migration `015` for compact material guidance and latest feedback (`014` was confirmed in the inspected deployment);
 2. verify the deployed Qwen environment (local credentials and live calls are already checked);
 3. deploy;
 4. enable reminders.

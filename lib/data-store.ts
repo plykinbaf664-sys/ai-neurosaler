@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildAdminAnalytics, type AnalyticsPeriod } from "@/lib/admin-analytics";
 
 import seedDatabase from "@/data/local-db.seed.json";
+import type { MaterialGuidance, MaterialFeedback } from "@/lib/storage/types";
 
 type LeadRow = {
   id: string;
@@ -171,6 +172,7 @@ type LibraryMaterialRow = {
   slug: string;
   title: string;
   short_description: string;
+  guidance?: MaterialGuidance | null;
   category: string;
   topic: string;
   url: string;
@@ -246,6 +248,7 @@ type UserLibraryProfileRow = {
   updated_at: string;
   journey_goal?: string | null;
   recommended_material_ids?: string[];
+  material_feedback?: Record<string, MaterialFeedback>;
   active_days?: number;
   last_active_date?: string | null;
   reminders_enabled?: boolean;
@@ -317,7 +320,7 @@ function ensureLibraryCollections(database: LocalDatabase) {
           material.category === seededMaterial.category && material.slug === seededMaterial.slug,
       );
 
-      if (existing) Object.assign(existing, seededMaterial);
+      if (existing) Object.assign(existing, seededMaterial, { guidance: existing.guidance ?? seededMaterial.guidance });
       else database.libraryMaterials.push(seededMaterial);
     }
 

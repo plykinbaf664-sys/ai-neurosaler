@@ -14,10 +14,15 @@ import { LIBRARY_CATEGORIES, getLibraryCategory, getLibraryCategoryLabel, isLibr
 import { getMaterialById } from "@/lib/library/materials";
 import { getCategoryProgress, markMaterialCompleted, markMaterialOpened, type CategoryProgress } from "@/lib/library/progress";
 import {
-  buildContextualLibraryReply,
+  getLibraryJourneyState,
+  getJourneyTrack,
   getNextMaterialAfter,
   getNextRecommendedMaterial,
 } from "@/lib/library/recommendations";
+import { buildContextualLibraryReply } from "@/lib/library/dialogue";
+import { formatMaterialCard } from "@/lib/library/presentation";
+import { withMainMenu } from "@/lib/telegram-navigation";
+import type { MaterialFeedback } from "@/lib/storage/types";
 import { unlockCategoryReward } from "@/lib/library/rewards";
 import { cancelLibraryFollowup, scheduleRequestedLibraryReminder, scheduleNextStepFollowup } from "@/lib/library/followups";
 import {
@@ -26,7 +31,7 @@ import {
   rememberLibraryUserMessage,
   setConversationRoute,
 } from "@/lib/library/user-profile";
-import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
+import { sendTextMessage, sendTextMessages, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
 import { createLibraryToken } from "@/lib/security/library-token";
 import { BALL_OPEN_ACTION, handlePredictionBall, isPredictionBallAction } from "@/lib/prediction-ball";
@@ -136,16 +141,18 @@ async function sendAndStore(
   text: string,
   markup?: Parameters<typeof sendTextMessage>[2],
 ) {
-  const result = await sendTextMessage(chatId, text, markup);
-  await insertMessage({
-    leadId: lead.id,
-    expertProfileId,
-    direction: "outgoing",
-    channel: "telegram",
-    telegramMessageId: result.telegramMessageId,
-    text,
-    messageType: "ai_reply",
-  });
+  const results = await sendTextMessages(chatId, text, withMainMenu(markup));
+  for (const result of results) {
+    await insertMessage({
+      leadId: lead.id,
+      expertProfileId,
+      direction: "outgoing",
+      channel: "telegram",
+      telegramMessageId: result.telegramMessageId,
+      text: result.text,
+      messageType: "ai_reply",
+    });
+  }
 }
 
 async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, expertProfileId: string, baseUrl: string) {
@@ -246,11 +253,13 @@ async function showMaterial(
     message.telegramChatId,
     lead,
     expertProfileId,
-    `**${material.title}**\n\n${material.short_description}\n\nОткрой материал, затем вернись сюда и отметь его прочитанным.\n\nИзучено ${progress.completed} из ${progress.total}`,
+    `${formatMaterialCard(material, { detailed: true, completed: progress.statuses.get(material.id) === "completed" })}\n\nОткрой материал, затем вернись сюда и отметь его прочитанным.\n\nИзучено ${progress.completed} из ${progress.total}`,
     {
       inline_keyboard: [
         [{ text: "Открыть материал", url: trackedUrl.toString() }],
         [{ text: "✅ Я прочитал", callback_data: `${COMPLETE_PREFIX}${material.id}` }],
+        [{ text: "💬 Помоги применить", callback_data: `lib:help:${material.id}` }, { text: "✨ Применил", callback_data: `lib:applied:${material.id}` }],
+        [{ text: "Не подходит · другой шаг", callback_data: `lib:skip:${material.id}` }],
         [{ text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` }],
         [{ text: "↩️ Назад в библиотеку", callback_data: `${ALL_PREFIX}${material.category}` }],
       ],
@@ -283,11 +292,12 @@ export async function handleLibraryTelegramAction(input: {
     message.text.startsWith(COMPLETE_PREFIX) ||
     message.text.startsWith(NEXT_PREFIX);
   const reminderAction = message.callbackQueryId && ["lib:reminders:off", "lib:reminders:on"].includes(message.text);
+  const journeyAction = message.callbackQueryId && /^(?:lib:route$|lib:(?:help|skip|applied):)/.test(message.text);
 
-  if (!isStart && !isLibraryAction && !reminderAction) return { handled: false, startMarketing: false };
+  if (!isStart && !isLibraryAction && !reminderAction && !journeyAction) return { handled: false, startMarketing: false };
 
   const lead = await ensureLibraryLead(message, expertProfile, input.existingLead);
-  if (lead.current_stage === "audit_request_requested" && (isStart || message.text === MAIN_MENU_ACTION || message.text.startsWith(CATEGORY_PREFIX))) {
+  if (lead.current_stage === "audit_request_requested" && (isStart || journeyAction || message.text === MAIN_MENU_ACTION || message.text.startsWith(CATEGORY_PREFIX))) {
     await updateLeadById(lead.id, { currentStage: "ecosystem_menu" });
   }
 
@@ -308,6 +318,48 @@ export async function handleLibraryTelegramAction(input: {
   }
 
   await storeIncoming(message, lead, expertProfile.id);
+
+  if (journeyAction) {
+    if (message.text === "lib:route") {
+      const state = await getLibraryJourneyState(lead.id);
+      const track = getJourneyTrack(state);
+      await sendAndStore(message.telegramChatId, lead, expertProfile.id,
+        ["**Твой маршрут**", state.profile?.journey_goal, ...track.map((material, i) => `${i + 1}. ${statusIcon(state.statuses.get(material.id) as "completed" | "opened" | undefined)} ${material.title}`),
+          track.length ? "Можно открыть любой шаг или написать, что хочется изменить." : "Подходящего следующего шага пока нет. Расскажи, что хочешь решить — подберём маршрут."].filter(Boolean).join("\n\n"),
+        { inline_keyboard: track.map(material => [{ text: material.title.slice(0, 60), callback_data: `${MATERIAL_PREFIX}${material.id}` }]) });
+    } else {
+      const [, action, id] = message.text.split(":");
+      const material = await getMaterialById(id);
+      if (!material?.is_active) {
+        await sendAndStore(message.telegramChatId, lead, expertProfile.id, "Этот материал больше не доступен. Выбери другой в библиотеке.");
+        return { handled: true, startMarketing: false, lead };
+      }
+      const profile = await getLibraryUserProfile(lead.id);
+      const feedback: MaterialFeedback = action === "skip" ? "not_relevant" : action === "applied" ? "applied" : "needs_help";
+      const entries = Object.entries(profile?.material_feedback ?? {}).filter(([key]) => key !== id);
+      await upsertUserLibraryProfile(lead.id, {
+        material_feedback: Object.fromEntries([...entries, [id, feedback]].slice(-20)),
+        last_material_slug: material.slug, last_material_title: material.title,
+        last_category: material.category === "life" ? "life" : "business", last_route: material.category === "life" ? "life" : "business",
+        ...(action === "skip" ? { recommended_material_ids: (profile?.recommended_material_ids ?? []).filter(value => value !== id) } : {}),
+      });
+      if (action === "help") {
+        const reply = await buildContextualLibraryReply(lead.id, `Помоги применить материал «${material.title}» к моей задаче. С чего начать?`);
+        await sendDialogueReply(message, lead, expertProfile.id, reply);
+      } else if (action === "skip") {
+        const next = await getNextRecommendedMaterial(lead.id);
+        await sendAndStore(message.telegramChatId, lead, expertProfile.id,
+          "Учту: этот материал сейчас не подходит. Что хотелось бы получить вместо него?",
+          { inline_keyboard: next ? [[{ text: "Посмотреть другой шаг", callback_data: `${MATERIAL_PREFIX}${next.id}` }]] : [] });
+      } else {
+        await sendAndStore(message.telegramChatId, lead, expertProfile.id, "Здорово, сохранил отметку о применении. Что получилось и что хочется улучшить?", {
+          inline_keyboard: [[{ text: "💬 Разобрать результат", callback_data: `lib:help:${material.id}` }], [{ text: "Мой маршрут", callback_data: "lib:route" }]],
+        });
+      }
+      await scheduleNextStepFollowup(lead.id);
+    }
+    return { handled: true, startMarketing: false, lead };
+  }
 
   if (isStart || message.text === MAIN_MENU_ACTION) {
     await trackUserEvent({
@@ -357,7 +409,7 @@ export async function handleLibraryTelegramAction(input: {
         message.telegramChatId,
         lead,
         expertProfile.id,
-        "Все активные материалы изучены. Дополнительный бонус уже открыт.",
+        "В текущем маршруте нет следующего материала этого направления. Можно вернуться к практике изученного или написать новую задачу.",
         { inline_keyboard: [[{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]] },
       );
     }
@@ -378,6 +430,7 @@ export async function handleLibraryTelegramAction(input: {
       const rewardUnlocked = await unlockCategoryReward(lead.id, progress);
       const nextMaterial = await getNextMaterialAfter(lead.id, material, progress);
       const buttons = [];
+      buttons.push([{ text: "💬 Помоги применить", callback_data: `lib:help:${material.id}` }]);
       if (nextMaterial) {
         buttons.push([
           { text: "➡️ Следующий материал", callback_data: `${NEXT_PREFIX}${material.id}` },
@@ -453,7 +506,8 @@ export async function handleLibraryContextMessage(input: {
   if (!isLibraryEnabled() || input.message.callbackQueryId || input.message.text.startsWith("/")) return false;
 
   const profile = input.existingLead ? await getLibraryUserProfile(input.existingLead.id) : null;
-  if (input.marketingFlowActive && profile?.last_route !== "life" && profile?.last_route !== "business") {
+  const afterHandoff = input.existingLead?.current_stage === "handoff" && !input.message.document;
+  if (input.marketingFlowActive && !afterHandoff && profile?.last_route !== "life" && profile?.last_route !== "business") {
     return false;
   }
 
@@ -469,6 +523,12 @@ export async function handleLibraryContextMessage(input: {
       ? "Сейчас автоматические напоминания выключены. Материал останется в твоём прогрессе — к нему можно вернуться через библиотеку в любой момент."
       : reply.text;
 
+  await sendDialogueReply(input.message, lead, input.expertProfile.id, { ...reply, text: responseText });
+  if (!reply.reminderRequested) await scheduleNextStepFollowup(lead.id);
+  return true;
+}
+
+async function sendDialogueReply(message: TelegramPrivateTextMessage, lead: LeadRow, expertId: string, reply: Awaited<ReturnType<typeof buildContextualLibraryReply>>) {
   const buttons = [];
   for (const [index, material] of reply.suggestedMaterials.entries()) {
     buttons.push([
@@ -478,10 +538,17 @@ export async function handleLibraryContextMessage(input: {
       },
     ]);
   }
+  for (const material of reply.revisitMaterials) {
+    buttons.push([{ text: `↩ Практика: ${material.title}`.slice(0, 60), callback_data: `${MATERIAL_PREFIX}${material.id}` }]);
+  }
+  if (!reply.suggestedMaterials.length && !reply.revisitMaterials.length) {
+    const next = await getNextRecommendedMaterial(lead.id);
+    if (next) buttons.push([{ text: `Продолжить: ${next.title}`.slice(0, 60), callback_data: `${MATERIAL_PREFIX}${next.id}` }]);
+  }
+  buttons.push([{ text: "🧭 Мой маршрут", callback_data: "lib:route" }]);
   buttons.push([{ text: "Назад в главное меню", callback_data: MAIN_MENU_ACTION }]);
-  await sendAndStore(input.message.telegramChatId, lead, input.expertProfile.id, responseText, {
+  const cards = [...reply.suggestedMaterials.map(material => formatMaterialCard(material)), ...reply.revisitMaterials.map(material => formatMaterialCard(material, { completed: true }))];
+  await sendAndStore(message.telegramChatId, lead, expertId, [reply.text, ...cards].join("\n\n"), {
     inline_keyboard: buttons,
   });
-  if (!reply.reminderRequested) await scheduleNextStepFollowup(lead.id);
-  return true;
 }

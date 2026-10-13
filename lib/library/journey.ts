@@ -1,11 +1,12 @@
 import "server-only";
-import { getActiveLibraryMaterials, getLibraryProgress, getUserLibraryProfile, getUserRewards, grantUserReward } from "@/lib/storage";
+import { getUserRewards, grantUserReward } from "@/lib/storage";
+import { getLibraryJourneyState, getJourneyTrack, selectNextMaterial } from "@/lib/library/recommendations";
 import { createLibraryToken } from "@/lib/security/library-token";
 
 export async function getJourneyDashboard(userId: string, publicBaseUrl: string) {
-  const [materials, profile, rewards] = await Promise.all([getActiveLibraryMaterials(), getUserLibraryProfile(userId), getUserRewards(userId)]);
-  const progress = await getLibraryProgress(userId, materials.map((material) => material.id));
-  const completedIds = new Set(progress.filter((item) => item.status === "completed").map((item) => item.material_id));
+  const [state, rewards] = await Promise.all([getLibraryJourneyState(userId), getUserRewards(userId)]);
+  const { materials, profile } = state;
+  const completedIds = new Set(materials.filter((item) => state.statuses.get(item.id) === "completed").map((item) => item.id));
   const completed = completedIds.size;
   const days = profile?.active_days ?? 0;
   const categoryCompleted = (category: string) => {
@@ -28,18 +29,18 @@ export async function getJourneyDashboard(userId: string, publicBaseUrl: string)
       earned.set(reward.key, new Date().toISOString());
     }
   }
-  const preferred = profile?.recommended_material_ids ?? [];
-  const selected = preferred.length ? preferred.flatMap((id) => {
-    const material = materials.find((item) => item.id === id);
-    return material ? [material] : [];
-  }) : materials.filter((material) => !completedIds.has(material.id) && material.category === profile?.last_category).slice(0, 3);
+  const selected = getJourneyTrack(state);
+  const next = selectNextMaterial(state);
   const track = selected.map((material) => {
     const url = new URL("/api/library/open", publicBaseUrl);
     url.searchParams.set("token", createLibraryToken({ userId, materialId: material.id, category: material.category, slug: material.slug }, 30 * 86400));
-    return { id: material.id, title: material.title, description: material.short_description, completed: completedIds.has(material.id), url: url.toString() };
+    return { id: material.id, title: material.title, description: material.short_description, guidance: material.guidance ?? null,
+      feedback: profile?.material_feedback?.[material.id] ?? null, isNext: next?.id === material.id,
+      completed: completedIds.has(material.id), url: url.toString() };
   });
   return { goal: profile?.journey_goal ?? null, completed, total: materials.length, activeDays: days,
-    remindersEnabled: profile?.reminders_enabled !== false, track,
+    remindersEnabled: profile?.reminders_enabled !== false, nextMaterialId: next?.id ?? null,
+    routeFinished: selected.length > 0 && !next, track,
     rewards: definitions.map((reward) => ({ ...reward, current: Math.min(reward.current, reward.target), unlocked: earned.has(reward.key), earnedAt: earned.get(reward.key) ?? null })) };
 }
 

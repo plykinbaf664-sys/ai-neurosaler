@@ -397,7 +397,7 @@ export async function sendTextMessages(chatId: number, text: string, replyMarkup
   const results = [];
 
   for (const [index, part] of parts.entries()) {
-    const result = await sendTextMessage(chatId, part, index === 0 ? replyMarkup : undefined);
+    const result = await sendTextMessage(chatId, part, index === parts.length - 1 ? replyMarkup : undefined);
     results.push(result);
   }
 

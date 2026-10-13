@@ -5,6 +5,8 @@ import { generateNeiroReply, summarizeAiFailure } from "@/lib/neiroclozer/genera
 import { sendTextMessage, type TelegramPrivateTextMessage } from "@/lib/telegram";
 import { trackUserEvent } from "@/lib/tracking/events";
 
+import { withMainMenu } from "@/lib/telegram-navigation";
+
 export const AUDIT_REQUEST_STAGE = "audit_request_requested";
 
 export function isAuditRequest(text: string) {
@@ -15,9 +17,9 @@ export function isAuditRequest(text: string) {
 }
 
 async function reply(message: TelegramPrivateTextMessage, lead: LeadRow, text: string, booking = false) {
-  const result = await sendTextMessage(message.telegramChatId, text, booking ? {
+  const result = await sendTextMessage(message.telegramChatId, text, withMainMenu(booking ? {
     inline_keyboard: [[{ text: "📅 Выбрать время созвона", url: getCalendarLink() }]],
-  } : undefined);
+  } : undefined));
   await insertMessage({ leadId: lead.id, expertProfileId: lead.expert_profile_id, direction: "outgoing", channel: "telegram",
     telegramMessageId: result.telegramMessageId, text, messageType: "ai_reply" });
 }
