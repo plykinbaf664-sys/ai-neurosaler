@@ -376,3 +376,56 @@ test("menu command returns from audit to main navigation without treating it as 
   assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "lib:cat:life"));
   assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.web_app?.url.endsWith("/journey")));
 });
+
+test("production main menu generates a permanent Mini App button despite stale ngrok settings", async () => {
+  const keys = ["PUBLIC_BASE_URL", "NEXT_PUBLIC_APP_URL", "TELEGRAM_WEBHOOK_BASE_URL", "VERCEL_ENV", "VERCEL_PROJECT_PRODUCTION_URL"];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, { PUBLIC_BASE_URL: "https://offline.ngrok-free.app", NEXT_PUBLIC_APP_URL: "https://offline.ngrok.io",
+      TELEGRAM_WEBHOOK_BASE_URL: "https://offline.ngrok-free.app", VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "stable.vercel.app" });
+    await post("/start", 836);
+    const button = lastMessage().reply_markup.inline_keyboard.flat().find(b => b.web_app);
+    assert.equal(button.web_app.url, "https://stable.vercel.app/journey");
+  } finally {
+    for (const key of keys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+  }
+});
+
+test("all active materials open from Telegram, Mini App and next links without leaking tokens or completing materials", async () => {
+  const { GET: open } = await import("../app/api/library/open/route.ts");
+  const { GET: next } = await import("../app/api/library/next/route.ts");
+  const { createLibraryToken } = await import("../lib/security/library-token.ts");
+  await post("/start", 837);
+  const lead = await storage.getLeadByTelegramUserId(837);
+  await storage.upsertUserLibraryProfile(lead.id, { recommended_material_ids: allMaterials.map(material => material.id) });
+  const dashboard = await getJourneyDashboard(lead.id, "https://neiro.test");
+  assert.equal(dashboard.track.length, allMaterials.length);
+  for (const material of allMaterials) {
+    await post(`lib:mat:${material.id}`, 837, true);
+    const telegramUrl = lastMessage().reply_markup.inline_keyboard.flat().find(button => button.url).url;
+    const journeyUrl = dashboard.track.find(item => item.id === material.id).url;
+    for (const url of [telegramUrl, journeyUrl]) {
+      assert.equal(new URL(url).origin, "https://neiro.test");
+      const response = await open(new Request(url));
+      assert.equal(response.status, 303);
+      assert.equal(response.headers.get("location"), material.url);
+      assert.equal(new URL(response.headers.get("location")).searchParams.has("token"), false);
+    }
+    const nextUrl = new URL(telegramUrl);
+    nextUrl.pathname = "/api/library/next";
+    const response = await next(new Request(nextUrl));
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), telegramUrl);
+  }
+  assert.ok((await storage.getLibraryProgress(lead.id, allMaterials.map(material => material.id))).every(item => item.status === "opened"));
+  assert.equal((await storage.getRecentUserEvents(lead.id, 200)).some(event => event.event_name === "material_completed"), false);
+  const material = allMaterials[0];
+  const expired = createLibraryToken({ userId: lead.id, materialId: material.id, category: material.category, slug: material.slug }, -60);
+  const eventsBefore = (await storage.getRecentUserEvents(lead.id, 200)).length;
+  for (const token of ["", "invalid", expired]) {
+    for (const handler of [open, next]) {
+      assert.equal((await handler(new Request(`https://neiro.test/api/library/open?token=${encodeURIComponent(token)}`))).status, 401);
+    }
+  }
+  assert.equal((await storage.getRecentUserEvents(lead.id, 200)).length, eventsBefore);
+});

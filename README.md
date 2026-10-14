@@ -121,6 +121,13 @@ NEIRO_GIFT_URL=
 NEIRO_ENTRY_FLOW_MODE=quiz
 ```
 
+`PUBLIC_BASE_URL` is the canonical origin for Mini App and tracked links; `NEXT_PUBLIC_APP_URL` is an
+alternative. On Vercel production, temporary ngrok/localhost URLs are skipped in favor of the stable
+`VERCEL_PROJECT_PRODUCTION_URL` or current request origin. `TELEGRAM_WEBHOOK_BASE_URL` is only a legacy
+fallback when no public URL or request is available. Local development may still use ngrok.
+After deployment, check `/api/status` → `library.miniAppUrl`, then send `/start` and use the new
+"Мой маршрут и награды" button. Old Telegram messages retain their original embedded URLs.
+
 The default entry flow is the three-step marketing ROI quiz. Set `NEIRO_ENTRY_FLOW_MODE=gift` to use the legacy gift flow.
 
 For Qwen, fill in the API key and OpenAI-compatible URL from the same provider region/workspace.
@@ -239,6 +246,11 @@ npm.cmd run build
 # Read-only checks of actual public destinations; no tracked user URLs or real bot messages.
 node --env-file=.env.local scripts/check-public-links.mjs --live
 ```
+
+The link check reads active destinations from Supabase, follows redirects and checks page titles,
+the Mini App/library pages, Telegram SDK, real bot deep link and share URL. Unsigned library endpoints
+must return 401. It exits nonzero on failed/unverified checks; `--base-url https://your-app.example`
+overrides the app origin for deployment checks. Signed user links are tested only in isolated storage.
 
 Optional isolated checks use PGlite and Playwright installed outside the project:
 `scripts/verify-journey-migration.mjs` accepts `PGLITE_MODULE` (path to its JS entry point), and

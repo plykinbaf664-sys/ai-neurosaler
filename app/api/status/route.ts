@@ -1,10 +1,11 @@
 import { getLocalStoreSummary } from "@/lib/storage";
 import { isLibraryEnabled, isLibraryLinkSecretConfigured } from "@/lib/library/config";
 import { getAiStatus } from "@/lib/neiroclozer/ai-config";
+import { getMiniAppUrl, getPublicBaseUrl } from "@/lib/public-links";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const store = await getLocalStoreSummary();
     const ai = getAiStatus();
@@ -33,6 +34,7 @@ export async function GET() {
       library: {
         enabled: isLibraryEnabled(),
         linkSecretConfigured: isLibraryLinkSecretConfigured(),
+        miniAppUrl: getMiniAppUrl(getPublicBaseUrl(request)),
       },
     });
   } catch (error) {
