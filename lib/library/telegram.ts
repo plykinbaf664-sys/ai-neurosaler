@@ -281,7 +281,7 @@ export async function handleLibraryTelegramAction(input: {
   if (!isLibraryEnabled()) return { handled: false, startMarketing: false };
 
   const { message, expertProfile } = input;
-  const isStart = /^\/start(?:@[a-z0-9_]+)?$/i.test(message.text.trim());
+  const isStart = /^\/(?:start|menu)(?:@[a-z0-9_]+)?$/i.test(message.text.trim());
   const isLibraryAction =
     message.text === MAIN_MENU_ACTION ||
     message.text === MARKETING_ACTION ||

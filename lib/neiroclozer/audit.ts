@@ -44,7 +44,7 @@ export async function beginAuditRequest(message: TelegramPrivateTextMessage, lea
 }
 
 export async function handleAuditMessage(message: TelegramPrivateTextMessage, expert: ExpertProfileRow, existing: LeadRow | null) {
-  if (message.callbackQueryId || message.text.startsWith("/start")) return null;
+  if (message.callbackQueryId || message.text.startsWith("/start") || /^\/menu(?:@[a-z0-9_]+)?$/i.test(message.text.trim())) return null;
   const pending = existing?.current_stage === AUDIT_REQUEST_STAGE;
   if (!pending && !isAuditRequest(message.text)) return null;
   const lead = existing ?? await createLead({ expertProfileId: expert.id, telegramUserId: message.telegramUserId,

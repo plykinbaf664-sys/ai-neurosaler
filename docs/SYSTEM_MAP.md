@@ -156,6 +156,9 @@ in `user_library_profiles.material_feedback`, separate from completion and rewar
 Ordinary text after audit handoff returns to the library-aware dialogue; pending quiz/analysis/audit intake
 keep their existing handlers. `lib/telegram-navigation.ts` preserves action buttons and adds main-menu access.
 For multi-message replies, navigation is attached to the final chunk.
+The native Telegram command menu exposes `/start` as "🏠 Главное меню" independently of chat messages.
+Configure it with `scripts/configure-telegram-menu.mjs --apply` (bot token environment); no message sends.
+`/menu` is an alias of the existing main-menu entry and bypasses audit intake before cancellation.
 
 ### Important rules
 

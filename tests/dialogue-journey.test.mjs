@@ -361,3 +361,18 @@ test("explicit application help exits pending audit intake so the next practice 
   assert.ok(!lead.audit_request);
   assert.ok(prompts.at(-1).includes("DATA CATALOG"));
 });
+
+test("menu command returns from audit to main navigation without treating it as CRM request or resetting progress", async () => {
+  await post("/start", 835);
+  const lead = await storage.getLeadByTelegramUserId(835);
+  await markMaterialCompleted(lead.id, decision);
+  await post("аудит", 835);
+  prompts.length = 0;
+  await post("/menu@JourneyBot", 835);
+  assert.equal((await storage.getLeadById(lead.id)).current_stage, "ecosystem_menu");
+  assert.ok(!(await storage.getLeadById(lead.id)).audit_request);
+  assert.equal((await storage.getLibraryProgress(lead.id, [decision.id]))[0].status, "completed");
+  assert.equal(prompts.length, 0);
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.callback_data === "lib:cat:life"));
+  assert.ok(lastMessage().reply_markup.inline_keyboard.flat().some(b => b.web_app?.url.endsWith("/journey")));
+});
