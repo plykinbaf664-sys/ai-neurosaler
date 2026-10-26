@@ -319,7 +319,8 @@ export async function sendPhoto(chatId: number, photo: string | Uint8Array) {
 }
 
 export async function captureAdminMedia(message: TelegramPrivateTextMessage) {
-  if (message.callbackQueryId || String(message.telegramUserId) !== process.env.ADMIN_TELEGRAM_ID?.trim()) return false;
+  const adminId = process.env.ADMIN_TELEGRAM_ID?.trim() || process.env.TELEGRAM_ADMIN_USER_ID?.trim();
+  if (message.callbackQueryId || String(message.telegramUserId) !== adminId) return false;
   const fileId = message.videoNoteFileId ?? message.photoFileId;
   if (!fileId) return false;
   await sendTextMessage(message.telegramChatId, `${message.videoNoteFileId ? "🎬 VIDEO_NOTE_FILE_ID" : "🖼 PHOTO_FILE_ID"}\n\n${fileId}`);

@@ -24,9 +24,13 @@ export function buildVisualPrompt(screen: VisualScreen) {
   ].join("\n");
 }
 
+function imageApiKey() {
+  return process.env.IMAGE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
+}
+
 async function generateImage(prompt: string) {
   if (process.env.IMAGE_PROVIDER !== "openai") throw new Error("Unsupported image provider");
-  const key = process.env.IMAGE_API_KEY?.trim();
+  const key = imageApiKey();
   const model = process.env.IMAGE_MODEL?.trim();
   if (!key || !model) throw new Error("Missing image provider configuration");
   // Separate image capability: Qwen/Anthropic text generation stays untouched.
@@ -68,7 +72,7 @@ export async function sendGeneratedVisual(chatId: number, userId: string, screen
       await sendPhoto(chatId, cached.file_id);
     } else {
       // Credentials are needed only on a cache miss. Ready assets keep working without them.
-      if (process.env.IMAGE_PROVIDER !== "openai" || !process.env.IMAGE_MODEL?.trim() || !process.env.IMAGE_API_KEY?.trim()) {
+      if (process.env.IMAGE_PROVIDER !== "openai" || !process.env.IMAGE_MODEL?.trim() || !imageApiKey()) {
         console.error("Generated visual configuration missing", screen.screenKey);
         return false;
       }

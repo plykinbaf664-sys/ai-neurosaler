@@ -29,7 +29,7 @@ let failVideo = false, failImage = false, failPhoto = false, blocked = false;
 globalThis.fetch = async (url, init = {}) => {
   const endpoint = String(url);
   if (endpoint === "https://api.openai.com/v1/images/generations") {
-    calls.push({ method: "generateImage", ...JSON.parse(init.body) });
+    calls.push({ method: "generateImage", authorization: init.headers.Authorization, ...JSON.parse(init.body) });
     return failImage ? Response.json({ error: "unavailable" }, { status: 503 }) : Response.json({ data: [{ b64_json: Buffer.from("fake-png").toString("base64") }] });
   }
   if (endpoint === "https://qwen.test/v1/chat/completions") {
@@ -47,9 +47,10 @@ globalThis.fetch = async (url, init = {}) => {
 beforeEach(async () => {
   for (const id of completedLeadIds) await storage.stopAiMapFollowups(id);
   calls.length = 0; failVideo = failImage = failPhoto = blocked = false;
+  delete process.env.OPENAI_API_KEY;
   Object.assign(process.env, { AI_MAP_ENABLED: "true", LIBRARY_ENABLED: "true", WELCOME_VIDEO_ENABLED: "false",
     IMAGE_GENERATION_ENABLED: "false", QUIZ_FOLLOWUPS_ENABLED: "false", LIBRARY_FOLLOWUPS_ENABLED: "false",
-    WELCOME_VIDEO_NOTE_FILE_ID: "", IMAGE_PROVIDER: "openai", IMAGE_MODEL: "gpt-image-1.5", IMAGE_API_KEY: "fake-image-key" });
+    WELCOME_VIDEO_NOTE_FILE_ID: "", ADMIN_TELEGRAM_ID: "77777", IMAGE_PROVIDER: "openai", IMAGE_MODEL: "gpt-image-1.5", IMAGE_API_KEY: "fake-image-key" });
 });
 after(() => { globalThis.fetch = originalFetch; });
 
@@ -107,6 +108,17 @@ test("admin media is captured before expert/lead routing; nonadmin media cannot 
   calls.length = 0;
   const result = await post("", ++nextUser, false, { video_note: { file_id: "private-circle" } });
   assert.equal(result.ignored, true); assert.equal(calls.length, 0);
+});
+
+test("media capture reuses the existing admin ID unless a separate media admin is configured", async () => {
+  process.env.ADMIN_TELEGRAM_ID = "  ";
+  await post("", 99999, false, { video_note: { file_id: "existing-admin-circle" } });
+  assert.equal(messages().at(-1).text, "🎬 VIDEO_NOTE_FILE_ID\n\nexisting-admin-circle");
+  process.env.ADMIN_TELEGRAM_ID = "77777";
+  calls.length = 0;
+  const result = await post("", 99999, false, { video_note: { file_id: "not-media-admin" } });
+  assert.equal(result.ignored, true);
+  assert.equal(calls.length, 0);
 });
 
 test("all five answers persist; result has three processes, priority, evidence, independent test and real material buttons", async () => {
@@ -296,6 +308,22 @@ test("generation caches Telegram asset persistently and coalesces concurrent gen
   assert.equal(calls.filter(c => c.method === "sendPhoto").length, 4);
   assert.match(buildVisualPrompt({ ...screen, category: "life" }), /Warm natural light/);
   assert.match(buildVisualPrompt(screen), /Business editorial/);
+});
+
+test("images reuse OPENAI_API_KEY and a dedicated IMAGE_API_KEY takes priority without changing cache", async () => {
+  const lead = (await complete()).lead;
+  process.env.IMAGE_GENERATION_ENABLED = "true";
+  process.env.IMAGE_API_KEY = "  ";
+  process.env.OPENAI_API_KEY = "existing-openai-key";
+  const screen = { screenKey: "shared-key-screen", type: "category", title: "Business", description: "Reuse existing credentials" };
+  calls.length = 0;
+  await sendGeneratedVisual(lead.telegram_chat_id, lead.id, screen);
+  assert.equal(calls.find(c => c.method === "generateImage").authorization, "Bearer existing-openai-key");
+  process.env.IMAGE_API_KEY = "dedicated-image-key";
+  await sendGeneratedVisual(lead.telegram_chat_id, lead.id, screen);
+  assert.equal(calls.filter(c => c.method === "generateImage").length, 1);
+  await sendGeneratedVisual(lead.telegram_chat_id, lead.id, { ...screen, screenKey: "dedicated-key-screen" });
+  assert.equal(calls.filter(c => c.method === "generateImage").at(-1).authorization, "Bearer dedicated-image-key");
 });
 
 test("image provider or Telegram upload failure leaves text flow available; no repeated immediate generation", async () => {
