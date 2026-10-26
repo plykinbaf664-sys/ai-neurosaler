@@ -4,7 +4,7 @@ import path from "node:path";
 import { buildAdminAnalytics, type AnalyticsPeriod } from "@/lib/admin-analytics";
 
 import seedDatabase from "@/data/local-db.seed.json";
-import type { MaterialGuidance, MaterialFeedback } from "@/lib/storage/types";
+import type { MaterialGuidance, MaterialFeedback, AiMapState, VisualAsset } from "@/lib/storage/types";
 
 type LeadRow = {
   id: string;
@@ -194,6 +194,8 @@ type LibraryProgressRow = {
 };
 
 type UserEventName =
+  | "ai_map_started" | "ai_map_completed" | "ai_map_result_shown" | "ai_map_material_clicked"
+  | "audit_cta_clicked" | "welcome_video_sent" | "generated_visual_sent" | "ai_map_followup_sent"
   | "audit_requested"
   | "audit_request_saved"
   | "calendar_link_sent"
@@ -252,9 +254,11 @@ type UserLibraryProfileRow = {
   active_days?: number;
   last_active_date?: string | null;
   reminders_enabled?: boolean;
+  ai_map?: AiMapState | null;
+  ai_map_followup_due_at?: string | null;
 };
 
-type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
+type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at" | "ai_map" | "ai_map_followup_due_at">>;
 
 type LocalDatabase = {
   version: number;
@@ -270,6 +274,7 @@ type LocalDatabase = {
   libraryProgress: LibraryProgressRow[];
   userEvents: UserEventRow[];
   userLibraryProfiles: UserLibraryProfileRow[];
+  visualAssets?: VisualAsset[];
 };
 
 type LocalStoreRuntime = {
@@ -980,6 +985,65 @@ export async function grantUserReward(userId: string, key: string, metadata: Rec
 
 export async function getUserRewards(userId: string) {
   return readDatabase((database) => database.userEvents.filter((event) => event.user_id === userId && event.event_name === "reward_unlocked").slice(0, 100));
+}
+
+export async function saveAiMap(userId: string, expectedVersion: string | null, state: AiMapState, dueAt: string | null) {
+  if (JSON.stringify(state).length > 16000 || state.answers.length > 5) throw new Error("AI map exceeds bounded state");
+  return mutateDatabase((db) => {
+    const profile = db.userLibraryProfiles.find(p => p.user_id === userId);
+    if (!profile || (profile.ai_map?.version ?? null) !== expectedVersion) return false;
+    profile.ai_map = structuredClone(state);
+    profile.ai_map_followup_due_at = dueAt;
+    return true;
+  });
+}
+
+export async function stopAiMapFollowups(userId: string) {
+  await mutateDatabase((db) => {
+    const p = db.userLibraryProfiles.find(p => p.user_id === userId);
+    if (p?.ai_map) p.ai_map = { ...p.ai_map, stopped: true, version: randomUUID() };
+    if (p) p.ai_map_followup_due_at = null;
+  });
+}
+
+export async function getDueAiMapProfiles(nowIso: string, limit = 50) {
+  return readDatabase(db => structuredClone(db.userLibraryProfiles.filter(p => p.ai_map_followup_due_at && p.ai_map_followup_due_at <= nowIso)
+    .sort((a, b) => a.ai_map_followup_due_at!.localeCompare(b.ai_map_followup_due_at!)).slice(0, limit)));
+}
+
+export async function claimAiMapFollowup(userId: string, version: string, step: number, nowIso: string, nextDue: string | null) {
+  return mutateDatabase(db => {
+    const p = db.userLibraryProfiles.find(p => p.user_id === userId);
+    const lead = db.leads.find(l => l.id === userId);
+    if (!p?.ai_map || p.ai_map.version !== version || p.ai_map.stopped || !p.ai_map.resultShownAt || p.reminders_enabled === false ||
+      !lead || !["active", "new"].includes(lead.status) || lead.audit_requested_at || /handoff|audit_request/.test(lead.current_stage) ||
+      !p.ai_map_followup_due_at || p.ai_map_followup_due_at > nowIso || step <= p.ai_map.followupStep || step > 4) return false;
+    p.ai_map = { ...p.ai_map, followupStep: step };
+    p.ai_map_followup_due_at = nextDue;
+    return true;
+  });
+}
+
+export async function getVisualAsset(key: string) {
+  return readDatabase(db => structuredClone(db.visualAssets?.find(a => a.screen_key === key) ?? null));
+}
+
+export async function claimVisualAsset(key: string, token: string, nowIso: string, retryAt: string) {
+  return mutateDatabase(db => {
+    db.visualAssets ??= [];
+    const asset = db.visualAssets.find(a => a.screen_key === key);
+    if (asset && (asset.file_id || asset.retry_at > nowIso)) return false;
+    if (asset) Object.assign(asset, { claim_token: token, retry_at: retryAt });
+    else db.visualAssets.push({ screen_key: key, file_id: null, claim_token: token, retry_at: retryAt });
+    return true;
+  });
+}
+
+export async function finishVisualAsset(key: string, token: string, fileId: string | null, retryAt: string) {
+  await mutateDatabase(db => {
+    const asset = db.visualAssets?.find(a => a.screen_key === key && a.claim_token === token);
+    if (asset) Object.assign(asset, { file_id: fileId, retry_at: retryAt });
+  });
 }
 
 export async function claimLibraryFollowup(userId: string, dueAt: string, nowIso: string, lastInteractionAt: string) {

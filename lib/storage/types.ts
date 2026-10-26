@@ -214,6 +214,14 @@ export type LibraryProgressRow = {
 };
 
 export type UserEventName =
+  | "ai_map_started"
+  | "ai_map_completed"
+  | "ai_map_result_shown"
+  | "ai_map_material_clicked"
+  | "audit_cta_clicked"
+  | "welcome_video_sent"
+  | "generated_visual_sent"
+  | "ai_map_followup_sent"
   | "audit_requested"
   | "audit_request_saved"
   | "calendar_link_sent"
@@ -272,9 +280,23 @@ export type UserLibraryProfileRow = {
   active_days?: number;
   last_active_date?: string | null;
   reminders_enabled?: boolean;
+  ai_map?: AiMapState | null;
+  ai_map_followup_due_at?: string | null;
 };
 
-export type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at">>;
+export type AiMapState = {
+  version: string;
+  answers: string[];
+  result?: { processKeys: string[]; materialIds: string[]; text: string };
+  completedAt?: string;
+  resultShownAt?: string;
+  followupStep: number;
+  stopped: boolean;
+};
+
+export type VisualAsset = { screen_key: string; file_id: string | null; claim_token: string; retry_at: string };
+
+export type UserLibraryProfilePatch = Partial<Omit<UserLibraryProfileRow, "user_id" | "updated_at" | "ai_map" | "ai_map_followup_due_at">>;
 
 export type UserEventInsertInput = {
   userId: string;
@@ -285,6 +307,13 @@ export type UserEventInsertInput = {
 };
 
 export interface StorageAdapter {
+  saveAiMap(userId: string, expectedVersion: string | null, state: AiMapState, dueAt: string | null): Promise<boolean>;
+  stopAiMapFollowups(userId: string): Promise<void>;
+  getDueAiMapProfiles(nowIso: string, limit?: number): Promise<UserLibraryProfileRow[]>;
+  claimAiMapFollowup(userId: string, version: string, step: number, nowIso: string, nextDue: string | null): Promise<boolean>;
+  getVisualAsset(key: string): Promise<VisualAsset | null>;
+  claimVisualAsset(key: string, token: string, nowIso: string, retryAt: string): Promise<boolean>;
+  finishVisualAsset(key: string, token: string, fileId: string | null, retryAt: string): Promise<void>;
   getActiveExpertProfile(): Promise<ExpertProfileRow | null>;
   getActiveExpertOffers(expertProfileId: string): Promise<ExpertOfferRow[]>;
   getActiveExpertFaq(expertProfileId: string): Promise<ExpertFaqRow[]>;

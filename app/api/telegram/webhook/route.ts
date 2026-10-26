@@ -22,6 +22,8 @@ import {
   type MessageRow,
 } from "@/lib/storage";
 import { handleTelegramAdminMessage } from "@/lib/telegram-admin";
+import { handleAiMapTelegram } from "@/lib/neiroclozer/ai-map-telegram";
+import { sendWelcomeVideo } from "@/lib/neiroclozer/visuals";
 import { handleLibraryContextMessage, handleLibraryTelegramAction } from "@/lib/library/telegram";
 import { BALL_SPIN_ACTION } from "@/lib/prediction-ball";
 import { trackUserEvent } from "@/lib/tracking/events";
@@ -60,6 +62,7 @@ import {
 import { detectPostQuizIntent, shouldClarifyBareUrl } from "@/lib/neiroclozer/post-quiz-intent";
 import {
   answerCallbackQuery,
+  captureAdminMedia,
   getTelegramFileDownloadUrl,
   parseTelegramPrivateTextMessage,
   sendTextMessage,
@@ -902,6 +905,8 @@ export async function POST(request: Request) {
       });
     }
 
+    if (await captureAdminMedia(incomingMessage)) return Response.json({ ok: true, adminMedia: true });
+    if (incomingMessage.videoNoteFileId || incomingMessage.photoFileId) return Response.json({ ok: true, ignored: true });
     if (await handleTelegramAdminMessage(incomingMessage)) {
       return Response.json({ ok: true, admin: true });
     }
@@ -913,6 +918,9 @@ export async function POST(request: Request) {
     }
 
     let existingLead = await getLeadByTelegramUserId(incomingMessage.telegramUserId);
+    if (await handleAiMapTelegram(incomingMessage, expertProfile, existingLead)) {
+      return Response.json({ ok: true, aiMap: true });
+    }
     const auditLead = await handleAuditMessage(incomingMessage, expertProfile, existingLead);
     if (auditLead) {
       await recordUserActivity(auditLead.id);
@@ -1047,6 +1055,7 @@ export async function POST(request: Request) {
     }
 
     if (isNewLead || shouldRestartQuiz) {
+      if (isStartCommand(incomingMessage.text)) await sendWelcomeVideo(incomingMessage.telegramChatId, lead.id);
       const welcomeResult = await sendTextMessage(incomingMessage.telegramChatId, expertProfile.welcome_message);
       await insertMessage({
         leadId: lead.id,

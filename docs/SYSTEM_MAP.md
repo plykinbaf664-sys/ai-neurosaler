@@ -8,6 +8,17 @@ Do not treat it as a substitute for inspecting the current code.
 
 ---
 
+## Main entry — AI business map (feature flag)
+
+With `AI_MAP_ENABLED=true`, `/start` opens the short AI-map offer and direct life/business library buttons.
+`lib/neiroclozer/ai-map-telegram.ts` owns five persisted answers and Telegram transitions;
+`ai-map.ts` owns deterministic process priorities, factual explanations and catalogue slug matching.
+The process-review CTA uses the existing `audit.ts` intake and calendar semantics.
+`ai-map-followups.ts` runs four bounded steps through the existing library cron endpoint;
+`visuals.ts` uses reusable Telegram assets with storage-backed leases and text fallback.
+Migration 016, flags, quiz audit, verification and operator instructions: `docs/AI_MAP_ROLLOUT.md`.
+The legacy marketing path below remains available through its existing callbacks/stages.
+
 ## Flow 1 — Marketing quiz → qualification → analysis → Alexander
 
 ### Product path

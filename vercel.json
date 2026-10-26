@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/library-followups",
-      "schedule": "15 12 * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }

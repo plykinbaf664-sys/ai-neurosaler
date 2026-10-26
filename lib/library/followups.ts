@@ -30,7 +30,8 @@ export function buildLibraryFollowupText(profile: UserLibraryProfileRow, next?: 
 export async function scheduleNextStepFollowup(userId: string) {
   if (!isLibraryFollowupsEnabled()) return false;
   const profile = await getUserLibraryProfile(userId);
-  if (!profile || profile.reminders_enabled === false || profile.last_route === "marketing") return false;
+  if (!profile || profile.reminders_enabled === false || profile.last_route === "marketing" ||
+    (process.env.AI_MAP_ENABLED === "true" && profile.ai_map?.resultShownAt && !profile.ai_map.stopped && profile.ai_map.followupStep < 4)) return false;
   const material = await nextStep(userId, profile);
   const now = new Date().toISOString();
   await upsertUserLibraryProfile(userId, { next_followup_due_at: material ? addHours(now, boundedHours("LIBRARY_FOLLOWUP_DELAY_HOURS", 24)) : null });
@@ -64,7 +65,8 @@ export async function sendDueLibraryFollowups(now = new Date()) {
   for (const profile of profiles) {
     try {
       const lead = await getLeadById(profile.user_id);
-      if (!lead || profile.reminders_enabled === false || profile.last_route === "marketing" || lead.current_stage === "audit_request_requested") {
+      if (!lead || profile.reminders_enabled === false || profile.last_route === "marketing" || lead.current_stage === "audit_request_requested" ||
+        (process.env.AI_MAP_ENABLED === "true" && profile.ai_map?.resultShownAt && !profile.ai_map.stopped && profile.ai_map.followupStep < 4)) {
         await cancelLibraryFollowup(profile.user_id);
         continue;
       }

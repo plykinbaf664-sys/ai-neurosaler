@@ -4,6 +4,7 @@ import { getLibraryJourneyState, selectNextMaterial } from "@/lib/library/recomm
 import { generateAiText, summarizeAiFailure } from "@/lib/neiroclozer/generate-reply";
 import { detectLibraryUserIntent } from "@/lib/library/user-profile";
 import { trackUserEvent } from "@/lib/tracking/events";
+import { IMPLEMENTATION_OFFER, isAiMapEnabled } from "@/lib/neiroclozer/ai-map";
 
 export function parseJourneyReply(raw: string, materials: LibraryMaterialRow[], completedIds: Set<string>, skippedIds = new Set<string>()) {
   const clean = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -32,6 +33,10 @@ export async function buildContextualLibraryReply(userId: string, userText: stri
   const completed = new Set([...statuses].filter(([, status]) => status === "completed").map(([id]) => id));
   const skipped = new Set(Object.entries(profile?.material_feedback ?? {}).filter(([, feedback]) => feedback === "not_relevant").map(([id]) => id));
   const prompt = [
+    ...(isAiMapEnabled() ? [
+      `Если человек после разбора спрашивает о внедрении, основной оффер Александра: ${IMPLEMENTATION_OFFER} Не приписывай клиенту факты, стоимость и обязательства. Не продавай без запроса.`,
+      `DATA AI MAP: ${JSON.stringify(profile?.ai_map?.result ?? null)}`,
+    ] : []),
     "Ты AI-навигатор Neiroclozer, ассистент Александра. Веди простой живой диалог на русском: ответь на последнее сообщение по существу, учитывая историю. Не повторяй прошлый ответ и не подменяй разговор предложением меню.",
     "Пиши обычно 1–3 коротких абзаца без канцелярита. Не объясняй устройство бота, JSON, интерфейс или появление карточек. Не обещай «ниже будет материал». При обсуждении практики ответь на вопрос или предложи один шаг, а не снова предлагай начать чтение.",
     "Если человек описал цель, подбери до 3 непройденных материалов из CATALOG в разумном порядке. Коротко объясни, почему начать с первого. Цель запиши его словами. Если цель неясна — задай один естественный вопрос. Не требуй анкету.",

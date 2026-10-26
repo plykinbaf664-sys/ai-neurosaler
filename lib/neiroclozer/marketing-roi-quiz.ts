@@ -29,32 +29,32 @@ export const MARKETING_ROI_QUIZ_STAGES = {
 export const MARKETING_ROI_QUIZ_QUESTIONS: MarketingRoiQuizQuestion[] = [
   {
     stage: MARKETING_ROI_QUIZ_STAGES.question1,
-    text: "Нейроквиз: Окупаемость маркетинга твоей компании\n\n1/3. Сколько заявок в месяц у вас сейчас приходит из маркетинга?",
+    text: "Сначала пойму, как у тебя устроен маркетинг.\n\n1/3. Сколько заявок за месяц приходит из рекламы и контента?",
     options: [
-      { key: "A", label: "A  0-10", score: ANSWER_SCORES.A },
-      { key: "B", label: "B  11-30", score: ANSWER_SCORES.B },
-      { key: "C", label: "C  31-100", score: ANSWER_SCORES.C },
-      { key: "D", label: "D  100+", score: ANSWER_SCORES.D },
+      { key: "A", label: "До 10 заявок", score: ANSWER_SCORES.A },
+      { key: "B", label: "11–30 заявок", score: ANSWER_SCORES.B },
+      { key: "C", label: "31–100 заявок", score: ANSWER_SCORES.C },
+      { key: "D", label: "100+ заявок", score: ANSWER_SCORES.D },
     ],
   },
   {
     stage: MARKETING_ROI_QUIZ_STAGES.question2,
-    text: "2/3. Вы понимаете, сколько денег реально приносит вам маркетинг?",
+    text: "2/3. Как ты понимаешь, сколько денег приносит маркетинг?",
     options: [
-      { key: "A", label: "A  вообще не понимаем", score: ANSWER_SCORES.A },
-      { key: "B", label: "B  понимаем примерно", score: ANSWER_SCORES.B },
-      { key: "C", label: "C  считаем вручную, но не точно", score: ANSWER_SCORES.C },
-      { key: "D", label: "D  считаем точно по цифрам", score: ANSWER_SCORES.D },
+      { key: "A", label: "Пока не можем связать заявки с деньгами", score: ANSWER_SCORES.A },
+      { key: "B", label: "Ориентируемся примерно, без расчётов", score: ANSWER_SCORES.B },
+      { key: "C", label: "Считаем вручную, но есть пробелы", score: ANSWER_SCORES.C },
+      { key: "D", label: "Видим точные цифры по выручке", score: ANSWER_SCORES.D },
     ],
   },
   {
     stage: MARKETING_ROI_QUIZ_STAGES.question3,
-    text: "3/3. Что чаще всего происходит с лидами после того, как они оставили заявку?",
+    text: "3/3. Что обычно происходит после того, как человек оставляет заявку?",
     options: [
-      { key: "A", label: "A  теряются / отвечаем поздно / нет системы", score: ANSWER_SCORES.A },
-      { key: "B", label: "B  часть дожимается, часть теряется", score: ANSWER_SCORES.B },
-      { key: "C", label: "C  в целом обрабатываем нормально, но есть просадки", score: ANSWER_SCORES.C },
-      { key: "D", label: "D  обработка почти без потерь", score: ANSWER_SCORES.D },
+      { key: "A", label: "Отвечаем поздно, часть заявок теряется", score: ANSWER_SCORES.A },
+      { key: "B", label: "К части клиентов возвращаемся, про других забываем", score: ANSWER_SCORES.B },
+      { key: "C", label: "Обычно всё в порядке, иногда упускаем шаги", score: ANSWER_SCORES.C },
+      { key: "D", label: "Почти у каждой заявки есть следующий шаг", score: ANSWER_SCORES.D },
     ],
   },
 ];

@@ -4,7 +4,7 @@ export const LIBRARY_CATEGORIES = [
 ] as const;
 
 export function isLibraryEnabled() {
-  return process.env.LIBRARY_ENABLED === "true";
+  return process.env.LIBRARY_ENABLED === "true" || process.env.AI_MAP_ENABLED === "true";
 }
 
 export function isLibraryLinkSecretConfigured() {

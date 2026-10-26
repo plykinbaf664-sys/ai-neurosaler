@@ -36,6 +36,9 @@ import { trackUserEvent } from "@/lib/tracking/events";
 import { createLibraryToken } from "@/lib/security/library-token";
 import { BALL_OPEN_ACTION, handlePredictionBall, isPredictionBallAction } from "@/lib/prediction-ball";
 import { getMiniAppUrl } from "@/lib/public-links";
+import { AI_MAP_ACTION, AI_MAP_ONBOARDING, isAiMapEnabled } from "@/lib/neiroclozer/ai-map";
+import { sendGeneratedVisual, sendWelcomeVideo } from "@/lib/neiroclozer/visuals";
+import { stopAiMapFollowups } from "@/lib/storage";
 
 const MAIN_MENU_ACTION = "nav:menu";
 const MARKETING_ACTION = "nav:marketing";
@@ -57,11 +60,11 @@ function mainMenuMarkup(baseUrl: string) {
   const miniAppUrl = getMiniAppUrl(baseUrl);
   return {
     inline_keyboard: [
-      [{ text: "📊 Разобрать маркетинг", callback_data: MARKETING_ACTION }],
+      [{ text: isAiMapEnabled() ? "🔥 Получить AI-карту бизнеса" : "📊 Разобрать маркетинг", callback_data: isAiMapEnabled() ? AI_MAP_ACTION : MARKETING_ACTION }],
       ...LIBRARY_CATEGORIES.map((category) => [
         { text: category.buttonLabel, callback_data: `${CATEGORY_PREFIX}${category.slug}` },
       ]),
-      ...(miniAppUrl ? [[{ text: "✨ Мой маршрут и награды", web_app: { url: miniAppUrl } }]] : []),
+      ...(!isAiMapEnabled() && miniAppUrl ? [[{ text: "✨ Мой маршрут и награды", web_app: { url: miniAppUrl } }]] : []),
     ],
   };
 }
@@ -156,11 +159,16 @@ async function sendAndStore(
 }
 
 async function showMainMenu(message: TelegramPrivateTextMessage, lead: LeadRow, expertProfileId: string, baseUrl: string) {
+  if (/^\/start/i.test(message.text)) await sendWelcomeVideo(message.telegramChatId, lead.id);
+  if (isAiMapEnabled()) {
+    await sendGeneratedVisual(message.telegramChatId, lead.id, { screenKey: "onboarding", type: "onboarding",
+      title: "AI-карта бизнеса", description: "Три первых процесса, ручная работа превращается в понятный маршрут внедрения", category: "business" });
+  }
   await sendAndStore(
     message.telegramChatId,
     lead,
     expertProfileId,
-    [
+    isAiMapEnabled() ? AI_MAP_ONBOARDING : [
       "**Привет! Ты в Neiroclozer — AI-навигаторе по экосистеме Александра.**",
       "",
       "Наша задача — помочь тебе не просто попробовать AI, а найти, где он реально улучшит жизнь, работу или бизнес: сэкономит время, уберёт рутину и покажет новые точки роста.",
@@ -223,6 +231,10 @@ async function showMaterial(
   material: LibraryMaterialRow,
   publicBaseUrl: string,
 ) {
+  if (["vozmozhno-vam-ne-nuzhny-novye-lidy", "chto-komanda-poobeshchala-i-zabyla", "300-otzyvov-za-5-minut"].includes(material.slug)) {
+    await sendGeneratedVisual(message.telegramChatId, lead.id, { screenKey: `material:${material.slug}`, type: "material",
+      title: material.title, description: material.short_description, category: material.category, materialSlug: material.slug });
+  }
   await markMaterialOpened(lead.id, material, { refreshProfile: false });
   const progress = await getCategoryProgress(lead.id, material.category);
   await trackUserEvent({
@@ -281,7 +293,7 @@ export async function handleLibraryTelegramAction(input: {
   if (!isLibraryEnabled()) return { handled: false, startMarketing: false };
 
   const { message, expertProfile } = input;
-  const isStart = /^\/(?:start|menu)(?:@[a-z0-9_]+)?$/i.test(message.text.trim());
+  const isStart = (isAiMapEnabled() ? /^\/(?:start|menu)(?:@[a-z0-9_]+)?(?:\s+\S+)?$/i : /^\/(?:start|menu)(?:@[a-z0-9_]+)?$/i).test(message.text.trim());
   const isLibraryAction =
     message.text === MAIN_MENU_ACTION ||
     message.text === MARKETING_ACTION ||
@@ -300,10 +312,14 @@ export async function handleLibraryTelegramAction(input: {
   if (lead.current_stage === "audit_request_requested" && (isStart || journeyAction || message.text === MAIN_MENU_ACTION || message.text.startsWith(CATEGORY_PREFIX))) {
     await updateLeadById(lead.id, { currentStage: "ecosystem_menu" });
   }
+  if (lead.current_stage === "ai_map_diagnosis" && (isStart || journeyAction || message.text === MAIN_MENU_ACTION || message.text.startsWith(CATEGORY_PREFIX))) {
+    await updateLeadById(lead.id, { currentStage: "ecosystem_menu" });
+  }
 
   if (reminderAction) {
     const enabled = message.text.endsWith(":on");
     await upsertUserLibraryProfile(lead.id, { reminders_enabled: enabled, next_followup_due_at: null });
+    if (!enabled && isAiMapEnabled()) await stopAiMapFollowups(lead.id);
     if (enabled) await scheduleNextStepFollowup(lead.id);
     await sendAndStore(message.telegramChatId, lead, expertProfile.id, enabled ? "Напоминания включены." : "Напоминания выключены. Продолжить можно в любой момент через /start.", {
       inline_keyboard: [[{ text: enabled ? "Выключить напоминания" : "Включить напоминания", callback_data: enabled ? "lib:reminders:off" : "lib:reminders:on" }]],
@@ -374,6 +390,8 @@ export async function handleLibraryTelegramAction(input: {
   if (message.text.startsWith(CATEGORY_PREFIX)) {
     const category = message.text.slice(CATEGORY_PREFIX.length);
     if (!getLibraryCategory(category)) return { handled: true, startMarketing: false, lead };
+    await sendGeneratedVisual(message.telegramChatId, lead.id, { screenKey: `category:${category}`, type: "category",
+      title: getLibraryCategoryLabel(category), description: category === "life" ? "Практические AI-сценарии для повседневных задач и решений" : "AI-сценарии для клиентов, команды и ручной работы", category });
     const progress = await getCategoryProgress(lead.id, category);
     await trackUserEvent({ userId: lead.id, eventName: "library_opened", category });
     await trackUserEvent({

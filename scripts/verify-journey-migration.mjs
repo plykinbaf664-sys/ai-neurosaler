@@ -13,6 +13,7 @@ try {
   }
   await db.exec(await readFile("supabase/sql/014_journey_and_audit.sql", "utf8"));
   await db.exec(await readFile("supabase/sql/015_dynamic_library.sql", "utf8"));
+  await db.exec(await readFile("supabase/sql/016_ai_map_and_visuals.sql", "utf8"));
   const seed = JSON.parse(await readFile("data/local-db.seed.json", "utf8"));
   const catalogue = (await db.query("select slug,guidance from library_materials where is_active order by slug")).rows;
   for (const material of catalogue) {
@@ -50,5 +51,32 @@ try {
   assert.equal((await db.query("select audit_request from leads where id=$1", [lead.id])).rows[0].audit_request, "Проверочный запрос на аудит");
   assert.equal((await db.query("select has_function_privilege('anon','public.record_user_activity(uuid)','execute') as allowed")).rows[0].allowed, false);
   assert.equal((await db.query("select has_function_privilege('service_role','public.record_user_activity(uuid)','execute') as allowed")).rows[0].allowed, true);
-  console.log("All migrations applied; 014/015 repeatable. Guidance matches local seed; editorial changes and feedback preserved. Activity, intake, single award, single reminder claim and RPC permissions passed.");
+  // New map data is compact, CAS-updated and independent from library completion.
+  await db.query("update leads set status='active',current_stage='ai_map_result',audit_requested_at=null where id=$1", [lead.id]);
+  const map = { version: "map-v1", answers: ["services", "sales", "sales", "sales", "sales"], result: { processKeys: ["sales", "team", "reports"], materialIds: [], text: "Map" },
+    resultShownAt: "2026-01-01T00:00:00Z", followupStep: 0, stopped: false };
+  assert.equal((await db.query("select save_ai_map($1,null,$2,'2026-01-01T01:00:00Z') as ok", [lead.id, map])).rows[0].ok, true);
+  assert.equal((await db.query("select save_ai_map($1,null,$2,null) as ok", [lead.id, map])).rows[0].ok, false);
+  const mapClaims = await Promise.all(Array.from({ length: 4 }, () => db.query("select claim_ai_map_followup($1,'map-v1',1,'2026-01-01T01:00:00Z','2026-01-01T03:00:00Z') as ok", [lead.id])));
+  assert.equal(mapClaims.filter(r => r.rows[0].ok).length, 1);
+  assert.equal((await db.query("select claim_ai_map_followup($1,'map-v1',1,'2026-01-01T01:00:00Z',null) as ok", [lead.id])).rows[0].ok, false);
+  for (const status of ['qualified', 'converted', 'needs_manual_followup']) {
+    await db.query("update leads set status=$2 where id=$1", [lead.id, status]);
+    assert.equal((await db.query("select claim_ai_map_followup($1,'map-v1',2,'2026-01-01T03:00:00Z',null) as ok", [lead.id])).rows[0].ok, false);
+  }
+  await db.query("update leads set status='active',current_stage='handoff' where id=$1", [lead.id]);
+  assert.equal((await db.query("select claim_ai_map_followup($1,'map-v1',2,'2026-01-01T03:00:00Z',null) as ok", [lead.id])).rows[0].ok, false);
+  await db.query("update leads set current_stage='ai_map_result' where id=$1", [lead.id]);
+  await db.query("select stop_ai_map_followups($1)", [lead.id]);
+  assert.equal((await db.query("select claim_ai_map_followup($1,'map-v1',2,'2026-01-01T03:00:00Z',null) as ok", [lead.id])).rows[0].ok, false);
+  assert.equal((await db.query("select save_ai_map($1,'map-v1',$2,null) as ok", [lead.id, map])).rows[0].ok, false);
+  const visualClaims = await Promise.all(Array.from({ length: 4 }, (_, i) => db.query("select claim_visual_asset('onboarding',$1,'2026-01-01T00:00:00Z','2026-01-01T00:05:00Z') as ok", [`token-${i}`])));
+  assert.equal(visualClaims.filter(r => r.rows[0].ok).length, 1);
+  await db.query("update telegram_visual_assets set file_id='cached-photo' where screen_key='onboarding'");
+  assert.equal((await db.query("select claim_visual_asset('onboarding','later','2026-01-02T00:00:00Z','2026-01-02T00:05:00Z') as ok")).rows[0].ok, false);
+  for (const signature of ['save_ai_map(uuid,text,jsonb,timestamptz)', 'stop_ai_map_followups(uuid)', 'claim_ai_map_followup(uuid,text,integer,timestamptz,timestamptz)', 'claim_visual_asset(text,text,timestamptz,timestamptz)']) {
+    assert.equal((await db.query("select has_function_privilege('anon',$1,'execute') as allowed", [`public.${signature}`])).rows[0].allowed, false);
+    assert.equal((await db.query("select has_function_privilege('service_role',$1,'execute') as allowed", [`public.${signature}`])).rows[0].allowed, true);
+  }
+  console.log("All migrations applied; 014/015/016 repeatable. Guidance/seed parity, completion, rewards, reminder claims, AI-map CAS/stop conditions, visual leases and RPC permissions passed.");
 } finally { await db.close(); }

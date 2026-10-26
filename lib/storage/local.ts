@@ -22,6 +22,13 @@ function sanitizeMaterial(input: LeadMaterialInsertInput): LeadMaterialInsertInp
 }
 
 export const localStorageAdapter: StorageAdapter = {
+  saveAiMap: localStore.saveAiMap,
+  stopAiMapFollowups: localStore.stopAiMapFollowups,
+  getDueAiMapProfiles: localStore.getDueAiMapProfiles,
+  claimAiMapFollowup: localStore.claimAiMapFollowup,
+  getVisualAsset: localStore.getVisualAsset,
+  claimVisualAsset: localStore.claimVisualAsset,
+  finishVisualAsset: localStore.finishVisualAsset,
   getActiveExpertProfile: localStore.getActiveExpertProfile,
   getActiveExpertOffers: localStore.getActiveExpertOffers,
   getActiveExpertFaq: localStore.getActiveExpertFaq,

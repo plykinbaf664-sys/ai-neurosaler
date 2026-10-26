@@ -190,6 +190,14 @@ export function getDueLibraryFollowupProfiles(nowIso: string, limit?: number) {
   return getStorageAdapter().getDueLibraryFollowupProfiles(nowIso, limit);
 }
 
+export const saveAiMap: StorageAdapter["saveAiMap"] = (...args) => getStorageAdapter().saveAiMap(...args);
+export const stopAiMapFollowups: StorageAdapter["stopAiMapFollowups"] = (...args) => getStorageAdapter().stopAiMapFollowups(...args);
+export const getDueAiMapProfiles: StorageAdapter["getDueAiMapProfiles"] = (...args) => getStorageAdapter().getDueAiMapProfiles(...args);
+export const claimAiMapFollowup: StorageAdapter["claimAiMapFollowup"] = (...args) => getStorageAdapter().claimAiMapFollowup(...args);
+export const getVisualAsset: StorageAdapter["getVisualAsset"] = (...args) => getStorageAdapter().getVisualAsset(...args);
+export const claimVisualAsset: StorageAdapter["claimVisualAsset"] = (...args) => getStorageAdapter().claimVisualAsset(...args);
+export const finishVisualAsset: StorageAdapter["finishVisualAsset"] = (...args) => getStorageAdapter().finishVisualAsset(...args);
+
 export type {
   AdminLeadRow,
   AdminOverview,

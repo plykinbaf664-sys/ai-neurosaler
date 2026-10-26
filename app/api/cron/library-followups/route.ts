@@ -1,4 +1,5 @@
 import { sendDueLibraryFollowups } from "@/lib/library/followups";
+import { sendDueAiMapFollowups } from "@/lib/neiroclozer/ai-map-followups";
 
 export const runtime = "nodejs";
 
@@ -15,7 +16,8 @@ export async function GET(request: Request) {
     }
 
     const result = await sendDueLibraryFollowups();
-    return Response.json({ ok: true, ...result });
+    const aiMap = await sendDueAiMapFollowups();
+    return Response.json({ ok: true, ...result, aiMap });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown cron error.";
     console.error("Library followups cron error:", message);

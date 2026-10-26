@@ -17,6 +17,8 @@ type TelegramMessage = {
   text?: string;
   caption?: string;
   document?: TelegramDocument;
+  video_note?: { file_id: string };
+  photo?: { file_id: string }[];
 };
 
 type TelegramDocument = {
@@ -46,6 +48,8 @@ export type TelegramPrivateTextMessage = {
   text: string;
   telegramMessageId: number;
   callbackQueryId?: string;
+  videoNoteFileId?: string;
+  photoFileId?: string;
   document?: {
     fileId: string;
     fileName: string | null;
@@ -281,7 +285,45 @@ export function parseTelegramPrivateTextMessage(update: TelegramUpdate): Telegra
           fileSize: message.document.file_size ?? null,
         }
       : undefined,
+    videoNoteFileId: message.video_note?.file_id,
+    photoFileId: message.photo?.at(-1)?.file_id,
   };
+}
+
+export class TelegramApiError extends Error {
+  constructor(public status: number, message: string) { super(message); this.name = "TelegramApiError"; }
+}
+
+export async function sendVideoNote(chatId: number, fileId: string) {
+  const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/sendVideoNote`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, video_note: fileId }), signal: AbortSignal.timeout(8_000),
+  });
+  const data = await response.json() as TelegramSendMessageResponse;
+  if (!response.ok || !data.ok || !data.result) throw new TelegramApiError(response.status, data.description || "sendVideoNote failed");
+  return data.result.message_id;
+}
+
+export async function sendPhoto(chatId: number, photo: string | Uint8Array) {
+  const body = new FormData();
+  body.set("chat_id", String(chatId));
+  if (typeof photo === "string") body.set("photo", photo);
+  else body.set("photo", new Blob([new Uint8Array(photo)], { type: "image/png" }), "visual.png");
+  const response = await fetch(`https://api.telegram.org/bot${getTelegramBotToken()}/sendPhoto`, {
+    method: "POST", body, signal: AbortSignal.timeout(8_000),
+  });
+  const data = await response.json() as { ok: boolean; result?: { photo?: { file_id: string }[] }; description?: string };
+  const fileId = data.result?.photo?.at(-1)?.file_id;
+  if (!response.ok || !data.ok || !fileId) throw new TelegramApiError(response.status, data.description || "sendPhoto failed");
+  return fileId;
+}
+
+export async function captureAdminMedia(message: TelegramPrivateTextMessage) {
+  if (message.callbackQueryId || String(message.telegramUserId) !== process.env.ADMIN_TELEGRAM_ID?.trim()) return false;
+  const fileId = message.videoNoteFileId ?? message.photoFileId;
+  if (!fileId) return false;
+  await sendTextMessage(message.telegramChatId, `${message.videoNoteFileId ? "🎬 VIDEO_NOTE_FILE_ID" : "🖼 PHOTO_FILE_ID"}\n\n${fileId}`);
+  return true;
 }
 
 export async function getTelegramFileDownloadUrl(fileId: string) {
@@ -383,7 +425,7 @@ export async function sendTextMessage(chatId: number, text: string, replyMarkup?
   const data = (await response.json()) as TelegramSendMessageResponse;
 
   if (!response.ok || !data.ok || !data.result) {
-    throw new Error(data.description || "Telegram sendMessage failed.");
+    throw new TelegramApiError(response.status, data.description || "Telegram sendMessage failed.");
   }
 
   return {

@@ -28,6 +28,7 @@ import type {
   UserEventInsertInput,
   UserLibraryProfilePatch,
   UserLibraryProfileRow,
+  VisualAsset,
 } from "@/lib/storage/types";
 
 const PROFILE_COLUMNS =
@@ -48,6 +49,11 @@ const LIBRARY_PROGRESS_COLUMNS = "id,user_id,material_id,status,created_at,updat
 const USER_EVENT_COLUMNS = "id,user_id,event_name,material_id,category,metadata,created_at";
 const USER_LIBRARY_PROFILE_COLUMNS =
   "user_id,selected_categories,opened_topics,completed_topics,last_route,last_category,last_material_slug,last_material_title,last_material_status,completed_count,engagement_score,last_followup_type,last_user_intent,last_interaction_at,last_followup_sent_at,next_followup_due_at,updated_at,journey_goal,recommended_material_ids,material_feedback,active_days,last_active_date,reminders_enabled";
+
+// Old deployments with both features disabled can still run before migration 016.
+function profileColumns() {
+  return USER_LIBRARY_PROFILE_COLUMNS + (process.env.AI_MAP_ENABLED === "true" ? ",ai_map,ai_map_followup_due_at" : "");
+}
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -304,6 +310,36 @@ async function getSupabaseAdminLeads(): Promise<AdminLeadRow[]> {
 }
 
 export const supabaseStorageAdapter: StorageAdapter = {
+  async saveAiMap(userId, expectedVersion, state, dueAt) {
+    return (await supabaseRequest<boolean>("rpc/save_ai_map", {}, { method: "POST", body: {
+      p_user_id: userId, p_expected_version: expectedVersion, p_state: state, p_due_at: dueAt,
+    } })).data;
+  },
+  async stopAiMapFollowups(userId) {
+    await supabaseRequest("rpc/stop_ai_map_followups", {}, { method: "POST", body: { p_user_id: userId } });
+  },
+  getDueAiMapProfiles(nowIso, limit = 50) {
+    return selectRows<UserLibraryProfileRow>("user_library_profiles", { select: profileColumns(),
+      ai_map_followup_due_at: `lte.${nowIso}`, order: "ai_map_followup_due_at.asc", limit: Math.min(limit, 100) });
+  },
+  async claimAiMapFollowup(userId, version, step, nowIso, nextDue) {
+    return (await supabaseRequest<boolean>("rpc/claim_ai_map_followup", {}, { method: "POST", body: {
+      p_user_id: userId, p_version: version, p_step: step, p_now: nowIso, p_next_due: nextDue,
+    } })).data;
+  },
+  getVisualAsset(key) {
+    return selectOne<VisualAsset>("telegram_visual_assets", { select: "screen_key,file_id,claim_token,retry_at", screen_key: `eq.${key}` });
+  },
+  async claimVisualAsset(key, token, nowIso, retryAt) {
+    return (await supabaseRequest<boolean>("rpc/claim_visual_asset", {}, { method: "POST", body: {
+      p_key: key, p_token: token, p_now: nowIso, p_retry_at: retryAt,
+    } })).data;
+  },
+  async finishVisualAsset(key, token, fileId, retryAt) {
+    await supabaseRequest("telegram_visual_assets", { screen_key: `eq.${key}`, claim_token: `eq.${token}` }, {
+      method: "PATCH", body: { file_id: fileId, retry_at: retryAt },
+    });
+  },
   async getActiveExpertProfile() {
     return applyProfileOverrides(
       await selectOne<ExpertProfileRow>("expert_profile", {
@@ -668,7 +704,7 @@ export const supabaseStorageAdapter: StorageAdapter = {
   },
   getUserLibraryProfile(userId) {
     return selectOne<UserLibraryProfileRow>("user_library_profiles", {
-      select: USER_LIBRARY_PROFILE_COLUMNS,
+      select: profileColumns(),
       user_id: `eq.${userId}`,
     });
   },
@@ -676,7 +712,7 @@ export const supabaseStorageAdapter: StorageAdapter = {
     const rows = (
       await supabaseRequest<UserLibraryProfileRow[]>(
         "user_library_profiles",
-        { on_conflict: "user_id", select: USER_LIBRARY_PROFILE_COLUMNS },
+        { on_conflict: "user_id", select: profileColumns() },
         {
           method: "POST",
           body: { user_id: userId, ...userLibraryProfilePayload(input) },
@@ -688,7 +724,7 @@ export const supabaseStorageAdapter: StorageAdapter = {
   },
   getDueLibraryFollowupProfiles(nowIso, limit = 20) {
     return selectRows<UserLibraryProfileRow>("user_library_profiles", {
-      select: USER_LIBRARY_PROFILE_COLUMNS,
+      select: profileColumns(),
       next_followup_due_at: `lte.${nowIso}`,
       order: "next_followup_due_at.asc",
       limit: Math.min(limit, 100),
